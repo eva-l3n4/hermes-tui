@@ -39,6 +39,7 @@ pub enum AppEvent {
     // Terminal events
     Key(KeyEvent),
     Tick,
+    AnimationTick,
     MouseScroll(i16),
     Resize(u16, u16),
 
@@ -138,6 +139,18 @@ impl EventLoop {
                             break;
                         }
                     }
+                }
+            }
+        });
+
+        // Animation tick — 50ms for smooth spinner/shimmer (20fps)
+        let anim_tx = tx.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(50));
+            loop {
+                interval.tick().await;
+                if anim_tx.send(AppEvent::AnimationTick).is_err() {
+                    break;
                 }
             }
         });

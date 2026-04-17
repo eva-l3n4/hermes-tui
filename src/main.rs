@@ -191,6 +191,9 @@ async fn run(
             event::AppEvent::Tick => {
                 app.tick();
             }
+            event::AppEvent::AnimationTick => {
+                app.handle_animation_tick();
+            }
             event::AppEvent::MouseScroll(delta) => {
                 app.handle_scroll(delta);
             }

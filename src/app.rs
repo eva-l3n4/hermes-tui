@@ -223,6 +223,33 @@ impl App {
         self.tick = self.tick.wrapping_add(1);
     }
 
+    /// Advance animation counters (called every 50ms).
+    pub fn handle_animation_tick(&mut self) {
+        if self.animation.phase == AgentPhase::Idle {
+            return;
+        }
+
+        // Spinner glyph: advance every ~120ms (every 2-3 ticks at 50ms)
+        self.animation.spinner_tick += 1;
+        if self.animation.spinner_tick >= 2 {
+            self.animation.spinner_tick = 0;
+            self.animation.frame = self.animation.frame.wrapping_add(1);
+        }
+
+        // Shimmer: advance every ~150ms (every 3rd tick)
+        self.animation.shimmer_tick += 1;
+        if self.animation.shimmer_tick >= 3 {
+            self.animation.shimmer_tick = 0;
+            let label_len = match self.animation.phase {
+                AgentPhase::Thinking => 8,   // "thinking"
+                AgentPhase::Streaming => 9,  // "streaming"
+                AgentPhase::Executing => 9,  // "executing"
+                AgentPhase::Idle => 1,
+            };
+            self.animation.shimmer_pos = (self.animation.shimmer_pos + 1) % label_len;
+        }
+    }
+
     /// Push a system message into the chat.
     pub fn sys_msg(&mut self, msg: impl Into<String>) {
         self.messages.push(ChatMessage {
