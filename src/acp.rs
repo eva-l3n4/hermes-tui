@@ -368,6 +368,8 @@ impl AcpClient {
             .map(|arr| {
                 arr.iter()
                     .filter_map(|s| {
+                        // field_meta enrichment is under "_meta" key
+                        let meta = s.get("_meta").or_else(|| s.get("fieldMeta"));
                         Some(SessionInfo {
                             session_id: s.get("sessionId")
                                 .or_else(|| s.get("session_id"))?
@@ -377,31 +379,35 @@ impl AcpClient {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or(".")
                                 .to_string(),
-                            model: s
-                                .get("model")
+                            model: meta
+                                .and_then(|m| m.get("model"))
                                 .and_then(|v| v.as_str())
+                                .or_else(|| s.get("model").and_then(|v| v.as_str()))
                                 .unwrap_or("")
                                 .to_string(),
-                            history_len: s
-                                .get("history_len")
+                            history_len: meta
+                                .and_then(|m| m.get("history_len"))
+                                .or_else(|| s.get("history_len"))
                                 .or_else(|| s.get("historyLen"))
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0)
                                 as usize,
-                            title: s
-                                .get("title")
+                            title: meta
+                                .and_then(|m| m.get("title"))
+                                .or_else(|| s.get("title"))
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string()),
-                            started_at: s
-                                .get("started_at")
+                            started_at: meta
+                                .and_then(|m| m.get("started_at"))
                                 .or_else(|| s.get("startedAt"))
                                 .and_then(|v| v.as_f64()),
-                            last_active: s
-                                .get("last_active")
+                            last_active: meta
+                                .and_then(|m| m.get("last_active"))
                                 .or_else(|| s.get("lastActive"))
                                 .and_then(|v| v.as_f64()),
-                            source: s
-                                .get("source")
+                            source: meta
+                                .and_then(|m| m.get("source"))
+                                .or_else(|| s.get("source"))
                                 .and_then(|v| v.as_str())
                                 .map(|s| s.to_string()),
                         })
