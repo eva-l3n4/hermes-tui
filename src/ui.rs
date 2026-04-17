@@ -578,9 +578,22 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(input_paragraph, area);
 
     if app.status == AgentStatus::Idle {
-        let cursor_x = area.x + 1 + (app.cursor as u16).saturating_sub(scroll_x);
-        let cursor_y = area.y + 1;
-        frame.set_cursor_position((cursor_x.min(area.x + area.width - 2), cursor_y));
+        // Calculate cursor row and column for multiline input
+        let text_before_cursor = &app.input[..app.cursor];
+        let cursor_row = text_before_cursor.lines().count().saturating_sub(1)
+            + if text_before_cursor.ends_with('\n') { 1 } else { 0 };
+        let cursor_col = text_before_cursor
+            .rsplit('\n')
+            .next()
+            .map(|line| line.len())
+            .unwrap_or(app.cursor);
+
+        let cursor_x = area.x + 1 + cursor_col as u16;
+        let cursor_y = area.y + 1 + cursor_row as u16;
+        frame.set_cursor_position((
+            cursor_x.min(area.x + area.width - 2),
+            cursor_y.min(area.y + area.height - 2),
+        ));
     }
 }
 
