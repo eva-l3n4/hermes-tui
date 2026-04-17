@@ -303,6 +303,8 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 
 /// Split any Line wider than `max_width` into multiple Lines.
 fn pre_wrap_lines(lines: Vec<Line<'static>>, max_width: usize) -> Vec<Line<'static>> {
+    use unicode_width::UnicodeWidthChar;
+
     if max_width == 0 {
         return lines;
     }
@@ -313,30 +315,133 @@ fn pre_wrap_lines(lines: Vec<Line<'static>>, max_width: usize) -> Vec<Line<'stat
             continue;
         }
 
-        // Walk spans preserving each span's style across wrap boundaries
-        let mut row_spans: Vec<Span<'static>> = Vec::new();
-        let mut row_width: usize = 0;
+        // Measure leading indent from the first span(s) to replicate on continuation lines.
+        let indent_width = {
+            let mut w = 0usize;
+            for span in &line.spans {
+                let mut all_ws = true;
+                for ch in span.content.chars() {
+                    if ch.is_whitespace() {
+                        w += UnicodeWidthChar::width(ch).unwrap_or(0);
+                    } else {
+                        all_ws = false;
+                        break;
+                    }
+                }
+                if !all_ws { break; }
+            }
+            w
+        };
+        // Clamp indent so continuation lines still have room for content
+        let cont_indent = indent_width.min(max_width / 2);
+        let cont_prefix = " ".repeat(cont_indent);
 
-        for span in line.spans.into_iter() {
-            let span_style = span.style;
-            let mut chunk = String::new();
+        // Flatten all spans into a list of (word_or_whitespace, style) tokens.
+        // A "word" is a maximal run of non-whitespace chars; whitespace is a run of spaces/tabs.
+        struct Token {
+            text: String,
+            style: Style,
+            width: usize,
+            is_ws: bool,
+        }
+        let mut tokens: Vec<Token> = Vec::new();
+        for span in line.spans.iter() {
+            let style = span.style;
+            let mut buf = String::new();
+            let mut buf_width = 0usize;
+            let mut buf_is_ws: Option<bool> = None;
 
             for ch in span.content.chars() {
-                let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-                if row_width + ch_width > max_width && (!row_spans.is_empty() || !chunk.is_empty()) {
-                    // Flush current chunk into row_spans before breaking
-                    if !chunk.is_empty() {
-                        row_spans.push(Span::styled(std::mem::take(&mut chunk), span_style));
-                    }
-                    result.push(Line::from(std::mem::take(&mut row_spans)));
-                    row_width = 0;
+                let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+                let ws = ch.is_whitespace();
+                if buf_is_ws == Some(!ws) {
+                    // Boundary: flush
+                    tokens.push(Token {
+                        text: std::mem::take(&mut buf),
+                        style,
+                        width: buf_width,
+                        is_ws: buf_is_ws.unwrap(),
+                    });
+                    buf_width = 0;
                 }
-                chunk.push(ch);
-                row_width += ch_width;
+                buf.push(ch);
+                buf_width += cw;
+                buf_is_ws = Some(ws);
             }
-            if !chunk.is_empty() {
-                row_spans.push(Span::styled(chunk, span_style));
+            if !buf.is_empty() {
+                tokens.push(Token {
+                    text: buf,
+                    style,
+                    width: buf_width,
+                    is_ws: buf_is_ws.unwrap_or(false),
+                });
             }
+        }
+
+        // Build rows from tokens with word-level wrapping.
+        let mut row_spans: Vec<Span<'static>> = Vec::new();
+        let mut row_width: usize = 0;
+        let mut is_first_row = true;
+
+        for token in tokens {
+            // If adding this token would overflow and we already have content, wrap.
+            if !token.is_ws && row_width + token.width > max_width && row_width > 0 {
+                // Trim trailing whitespace from current row
+                if let Some(last) = row_spans.last_mut() {
+                    let trimmed = last.content.trim_end().to_string();
+                    if trimmed.is_empty() {
+                        row_spans.pop();
+                    } else {
+                        *last = Span::styled(trimmed, last.style);
+                    }
+                }
+                result.push(Line::from(std::mem::take(&mut row_spans)));
+                is_first_row = false;
+
+                // Start new row with continuation indent
+                row_spans.push(Span::raw(cont_prefix.clone()));
+                row_width = cont_indent;
+            }
+
+            // Skip leading whitespace on continuation lines (indent already applied)
+            if token.is_ws && !is_first_row && row_width == cont_indent {
+                continue;
+            }
+
+            // If a single word is wider than max_width, force-break it character-by-character
+            if token.width > max_width.saturating_sub(row_width) && token.width > max_width.saturating_sub(cont_indent) {
+                let style = token.style;
+                let mut chunk = String::new();
+                let mut chunk_width = 0usize;
+                for ch in token.text.chars() {
+                    let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+                    if row_width + chunk_width + cw > max_width && (row_width + chunk_width) > 0 {
+                        if !chunk.is_empty() {
+                            row_spans.push(Span::styled(std::mem::take(&mut chunk), style));
+                            chunk_width = 0;
+                        }
+                        result.push(Line::from(std::mem::take(&mut row_spans)));
+                        is_first_row = false;
+                        row_spans.push(Span::raw(cont_prefix.clone()));
+                        row_width = cont_indent;
+                    }
+                    chunk.push(ch);
+                    chunk_width += cw;
+                }
+                if !chunk.is_empty() {
+                    row_spans.push(Span::styled(chunk, style));
+                    row_width += chunk_width;
+                }
+                continue;
+            }
+
+            row_spans.push(Span::styled(token.text, token.style));
+            row_width += token.width;
+        }
+
+        // Flush remaining spans
+        if !row_spans.is_empty() {
+            result.push(Line::from(row_spans));
         }
     }
     result

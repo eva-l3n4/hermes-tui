@@ -753,8 +753,8 @@ impl App {
             }
             "/title" => {
                 // Capture title locally for status bar, then forward to server
-                if let Some(title) = parts.get(1) {
-                    self.session_title = Some(title.to_string());
+                if parts.len() > 1 {
+                    self.session_title = Some(parts[1..].join(" "));
                 }
                 false // fall through to send as prompt — server handles /title
             }
