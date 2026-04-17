@@ -1,0 +1,30 @@
+[package]
+name = "hermes-tui"
+version = "0.1.0"
+edition = "2021"
+description = "Terminal UI for Hermes Agent"
+
+[dependencies]
+# TUI framework — double-buffered, flicker-free
+ratatui = { version = "0.29", features = ["crossterm"] }
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# HTTP client + SSE streaming
+reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest-eventsource = "0.6"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Markdown rendering in terminal
+termimad = "0.30"
+
+# Misc
+uuid = { version = "1", features = ["v4"] }
+dirs = "6"
+anyhow = "1"
