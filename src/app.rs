@@ -485,6 +485,8 @@ impl App {
 
                 // Start thinking
                 self.status = AgentStatus::Thinking;
+                self.animation.set_phase(AgentPhase::Thinking);
+                self.animation.turn_start = Some(std::time::Instant::now());
                 self.pending_response.clear();
                 self.pending_thought.clear();
                 self.active_tools.clear();
@@ -882,6 +884,10 @@ impl App {
     pub fn handle_agent_message(&mut self, text: &str) {
         // Flush any accumulated thought before streaming response text
         self.flush_pending_thought();
+        if self.animation.phase != AgentPhase::Streaming {
+            self.animation.set_phase(AgentPhase::Streaming);
+        }
+        self.animation.last_output = std::time::Instant::now();
         self.pending_response.push_str(text);
         self.scroll_offset = 0;
     }
@@ -892,6 +898,10 @@ impl App {
         if !self.pending_response.is_empty() {
             self.flush_pending_response(None);
         }
+        if self.animation.phase == AgentPhase::Idle {
+            self.animation.set_phase(AgentPhase::Thinking);
+        }
+        self.animation.last_output = std::time::Instant::now();
         self.pending_thought.push_str(text);
     }
 
@@ -901,6 +911,9 @@ impl App {
         if !self.pending_response.is_empty() {
             self.flush_pending_response(None);
         }
+
+        self.animation.set_phase(AgentPhase::Executing);
+        self.animation.active_tool = Some(name.to_string());
 
         self.active_tools.push((id.to_string(), name.to_string()));
 
@@ -922,6 +935,12 @@ impl App {
     pub fn handle_tool_update(&mut self, id: &str, status: &str, content: Option<&str>) {
         if status == "completed" || status == "error" {
             self.active_tools.retain(|(tid, _)| tid != id);
+
+            // When all tools finish, go back to Thinking (model processes result)
+            if self.active_tools.is_empty() {
+                self.animation.set_phase(AgentPhase::Thinking);
+                self.animation.active_tool = None;
+            }
         }
 
         // Update the existing tool message in-place
@@ -979,13 +998,27 @@ impl App {
     }
 
     pub fn handle_prompt_done(&mut self, _stop_reason: &str, usage: Option<Usage>) {
+        // Compute elapsed time for turn summary
+        let elapsed = self.animation.turn_start
+            .map(|t| t.elapsed().as_secs_f64());
+
         if let Some(ref u) = usage {
             self.total_input_tokens += u.input_tokens;
             self.total_output_tokens += u.output_tokens;
             self.prompt_count += 1;
         }
-        self.flush_pending_response(usage);
+
+        // Attach elapsed time to usage
+        let usage_with_elapsed = usage.map(|mut u| {
+            u.elapsed_secs = elapsed;
+            u
+        });
+
+        self.flush_pending_response(usage_with_elapsed);
         self.status = AgentStatus::Idle;
+        self.animation.set_phase(AgentPhase::Idle);
+        self.animation.active_tool = None;
+        self.animation.turn_start = None;
         self.active_tools.clear();
         self.tool_msg_map.clear();
         self.scroll_offset = 0;
