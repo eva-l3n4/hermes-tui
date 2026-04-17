@@ -712,16 +712,56 @@ impl App {
 
     // ---- ACP event handlers -------------------------------------------------
 
+    /// Flush accumulated reasoning text into a Thought message.
+    fn flush_pending_thought(&mut self) {
+        if !self.pending_thought.is_empty() {
+            let thought = std::mem::take(&mut self.pending_thought);
+            self.messages.push(ChatMessage {
+                role: Role::Thought,
+                content: thought,
+                tokens: None,
+            });
+        }
+    }
+
+    /// Flush accumulated streaming response into an Assistant message.
+    fn flush_pending_response(&mut self, usage: Option<Usage>) {
+        // Always flush thought before response (reasoning precedes the answer)
+        self.flush_pending_thought();
+
+        let content = std::mem::take(&mut self.pending_response);
+        if !content.is_empty() {
+            self.messages.push(ChatMessage {
+                role: Role::Assistant,
+                content,
+                tokens: usage,
+            });
+        }
+    }
+
     pub fn handle_agent_message(&mut self, text: &str) {
+        // Flush any accumulated thought before streaming response text
+        self.flush_pending_thought();
         self.pending_response.push_str(text);
         self.scroll_offset = 0;
     }
 
     pub fn handle_agent_thought(&mut self, text: &str) {
+        // Flush any pending response before accumulating thought
+        // (handles interleaved: response → thought → response)
+        if !self.pending_response.is_empty() {
+            self.flush_pending_response(None);
+        }
         self.pending_thought.push_str(text);
     }
 
     pub fn handle_tool_start(&mut self, id: &str, name: &str, _kind: Option<&str>) {
+        // Flush thought/response before tool calls
+        self.flush_pending_thought();
+        if !self.pending_response.is_empty() {
+            self.flush_pending_response(None);
+        }
+
         self.active_tools.push((id.to_string(), name.to_string()));
         let idx = self.messages.len();
         self.messages.push(ChatMessage {
@@ -781,25 +821,7 @@ impl App {
     }
 
     pub fn handle_prompt_done(&mut self, _stop_reason: &str, usage: Option<Usage>) {
-        // Flush pending thought
-        if !self.pending_thought.is_empty() {
-            let thought = std::mem::take(&mut self.pending_thought);
-            self.messages.push(ChatMessage {
-                role: Role::Thought,
-                content: thought,
-                tokens: None,
-            });
-        }
-
-        // Flush pending response
-        let content = std::mem::take(&mut self.pending_response);
-        if !content.is_empty() {
-            self.messages.push(ChatMessage {
-                role: Role::Assistant,
-                content,
-                tokens: usage,
-            });
-        }
+        self.flush_pending_response(usage);
         self.status = AgentStatus::Idle;
         self.active_tools.clear();
         self.tool_msg_map.clear();
