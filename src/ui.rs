@@ -165,9 +165,8 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     if !app.pending_response.is_empty() {
         let label = Line::from(vec![
             Span::styled("  ◆ ", Style::default().fg(Color::Magenta)),
-            Span::styled("assistant", Style::default().fg(Color::Magenta).bold()),
             Span::styled(
-                " (streaming…)",
+                "(streaming…)",
                 Style::default().fg(Color::DarkGray).italic(),
             ),
         ]);
@@ -291,22 +290,21 @@ fn render_message(lines: &mut Vec<Line>, msg: &ChatMessage, width: usize, verbos
         return;
     }
 
-    let (icon, color, label) = match msg.role {
-        Role::User => ("  ❯ ", Color::Cyan, "you"),
-        Role::Assistant => ("  ◆ ", Color::Magenta, "assistant"),
-        Role::System => ("  ● ", Color::Yellow, "system"),
+    let (icon, color) = match msg.role {
+        Role::User => ("  ❯ ", Color::Cyan),
+        Role::Assistant => ("  ◆ ", Color::Magenta),
+        Role::System => ("  ● ", Color::Yellow),
         Role::Tool => unreachable!(),
-        Role::Thought => ("  ○ ", Color::DarkGray, "thought"),
+        Role::Thought => ("  ○ ", Color::DarkGray),
     };
 
     let mut header_spans = vec![
         Span::styled(icon, Style::default().fg(color)),
-        Span::styled(label, Style::default().fg(color).bold()),
     ];
 
     if let Some(usage) = &msg.tokens {
         header_spans.push(Span::styled(
-            format!("  [{}→{}]", usage.input_tokens, usage.output_tokens),
+            format!("[{}→{}]", usage.input_tokens, usage.output_tokens),
             Style::default().fg(Color::DarkGray),
         ));
     }
@@ -613,9 +611,9 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let title = if app.status == AgentStatus::Idle {
-        " ❯ message "
+        " ❯ "
     } else {
-        " ⏳ waiting… "
+        " ⏳ "
     };
 
     let block = Block::default()
@@ -635,9 +633,21 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         0
     };
 
-    let input_paragraph = Paragraph::new(app.input.as_str())
+    // Show placeholder when input is empty
+    let display_text = if app.input.is_empty() && app.status == AgentStatus::Idle {
+        "Type a message… (/help for commands)"
+    } else {
+        &app.input
+    };
+    let text_style = if app.input.is_empty() && app.status == AgentStatus::Idle {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let input_paragraph = Paragraph::new(display_text)
         .block(block)
-        .style(Style::default().fg(Color::White))
+        .style(text_style)
         .scroll((0, scroll_x));
 
     frame.render_widget(input_paragraph, area);
