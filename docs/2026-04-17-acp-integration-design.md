@@ -125,7 +125,7 @@ iteration.
 Full-screen picker shown on startup before entering chat mode.
 
 ```
- ┌─ 🌸 Hermes ──────────────────────────────────────────────┐
+ ┌─ 🌸 Hanami ──────────────────────────────────────────────┐
  │                                                           │
  │  > New Session                                            │
  │    Rust best practices review          12 msgs      2h ago│
@@ -166,6 +166,7 @@ When the agent hits a dangerous command, the ACP server sends a
     "tool_call": { "title": "rm -rf /tmp/build/*", "kind": "execute" },
     "options": [
       { "option_id": "allow_once", "kind": "allow_once", "name": "Allow once" },
+      { "option_id": "allow_session", "kind": "allow_once", "name": "Allow for session" },
       { "option_id": "allow_always", "kind": "allow_always", "name": "Allow always" },
       { "option_id": "deny", "kind": "reject_once", "name": "Deny" }
     ]
@@ -181,6 +182,7 @@ When the agent hits a dangerous command, the ACP server sends a
  │  rm -rf /tmp/build/*                          │
  │                                               │
  │  > Allow once                                 │
+ │    Allow for session                          │
  │    Allow always                               │
  │    Deny                                       │
  │                                               │
@@ -435,6 +437,11 @@ These are not blockers for v1 but would enhance the experience:
 5. **`/yolo` toggle** — change approval mode mid-session. Map to
    `set_config_option` or a dedicated slash command that toggles
    `approvals.mode` between `manual` and `off`.
+
+6. **Session-scope approval option** — add `allow_session` to
+   `permissions.py`'s option list and map it to hermes' `"session"` approval
+   scope. Currently the ACP adapter only offers `allow_once`, `allow_always`,
+   and `deny` — missing the gateway's "approve for this session" flow.
 
 ---
 
