@@ -44,11 +44,7 @@ fn bounce_sequence() -> Vec<char> {
 
 /// Three-step shimmer: highlighted char, adjacent, and base.
 fn shimmer_color(char_idx: usize, highlight_pos: usize) -> Color {
-    let dist = if char_idx >= highlight_pos {
-        char_idx - highlight_pos
-    } else {
-        highlight_pos - char_idx
-    };
+    let dist = char_idx.abs_diff(highlight_pos);
     match dist {
         0 => Color::White,    // highlight
         1 => Color::Gray,     // adjacent
@@ -82,7 +78,7 @@ fn render_turn_summary(usage: &Usage, width: usize) -> Line<'static> {
     let in_tok = format_tokens(usage.input_tokens);
     let out_tok = format_tokens(usage.output_tokens);
     let elapsed = usage.elapsed_secs
-        .map(|s| format_elapsed(s))
+        .map(format_elapsed)
         .unwrap_or_default();
 
     let content = if elapsed.is_empty() {
