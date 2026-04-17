@@ -26,13 +26,71 @@ pub struct ChatMessage {
     pub tokens: Option<Usage>,
 }
 
-/// What the assistant is currently doing.
+/// What the assistant is currently doing (gates input acceptance).
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub enum AgentStatus {
     Idle,
     Thinking,
     Error(String),
+}
+
+/// What the agent is actively doing (drives spinner animation).
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentPhase {
+    Idle,
+    Thinking,
+    Streaming,
+    Executing,
+}
+
+/// Animation state for the spinner line — updated on AnimationTick.
+pub struct AnimationState {
+    /// Index into the bounce sequence.
+    pub frame: usize,
+    /// Sub-counter for spinner advancement (~120ms).
+    pub spinner_tick: u8,
+    /// Current agent phase.
+    pub phase: AgentPhase,
+    /// When the current phase began.
+    pub phase_start: std::time::Instant,
+    /// Last time content was received (future: stall detection).
+    pub last_output: std::time::Instant,
+    /// Shimmer highlight position (which char in the label).
+    pub shimmer_pos: usize,
+    /// Sub-counter for shimmer advancement (~150ms).
+    pub shimmer_tick: u8,
+    /// Name of currently executing tool.
+    pub active_tool: Option<String>,
+    /// When the current turn (prompt) started.
+    pub turn_start: Option<std::time::Instant>,
+}
+
+impl AnimationState {
+    pub fn new() -> Self {
+        let now = std::time::Instant::now();
+        Self {
+            frame: 0,
+            spinner_tick: 0,
+            phase: AgentPhase::Idle,
+            phase_start: now,
+            last_output: now,
+            shimmer_pos: 0,
+            shimmer_tick: 0,
+            active_tool: None,
+            turn_start: None,
+        }
+    }
+
+    /// Transition to a new phase, resetting timers.
+    pub fn set_phase(&mut self, phase: AgentPhase) {
+        if self.phase != phase {
+            self.phase = phase;
+            self.phase_start = std::time::Instant::now();
+            self.shimmer_pos = 0;
+            self.shimmer_tick = 0;
+        }
+    }
 }
 
 /// Which screen is active.
@@ -82,6 +140,7 @@ pub struct App {
     pub session_title: Option<String>,
     pub tick: u64,
     pub verbose: bool,
+    pub animation: AnimationState,
 
     // Event channel for sending ACP requests
     pub event_tx: Option<mpsc::UnboundedSender<AppEvent>>,
@@ -137,6 +196,7 @@ impl App {
             session_title: None,
             tick: 0,
             verbose: false,
+            animation: AnimationState::new(),
             event_tx: None,
             active_tools: Vec::new(),
             tool_msg_map: HashMap::new(),
@@ -429,6 +489,7 @@ impl App {
                                     output_tokens: u.get("output_tokens")
                                         .or_else(|| u.get("outputTokens"))
                                         .and_then(|v| v.as_u64())?,
+                                    elapsed_secs: None,
                                 })
                             });
                             let _ = event_tx.send(AppEvent::PromptDone { stop_reason, usage });

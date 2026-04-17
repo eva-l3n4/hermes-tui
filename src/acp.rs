@@ -362,6 +362,7 @@ impl AcpClient {
                     Some(Usage {
                         input_tokens: u.get("input_tokens")?.as_u64()?,
                         output_tokens: u.get("output_tokens")?.as_u64()?,
+                        elapsed_secs: None,
                     })
                 });
                 let _ = event_tx.send(AppEvent::PromptDone { stop_reason, usage });

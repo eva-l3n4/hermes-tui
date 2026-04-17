@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 pub struct Usage {
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub elapsed_secs: Option<f64>,
 }
 
 /// An option in an approval request.
