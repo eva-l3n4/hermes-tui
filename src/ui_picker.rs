@@ -79,8 +79,13 @@ pub fn draw_picker(frame: &mut Frame, sessions: &[SessionInfo], selected: usize)
 
     lines.push(Line::from(""));
 
+    let hint_text = if sessions.is_empty() {
+        "  Connecting to Hermes…"
+    } else {
+        "  Enter: select  Esc: quit"
+    };
     let hint = Line::from(Span::styled(
-        "  Enter: select  Esc: quit",
+        hint_text,
         Style::default().fg(Color::DarkGray),
     ));
     lines.push(hint);

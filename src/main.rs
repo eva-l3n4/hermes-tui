@@ -7,7 +7,6 @@ mod ui_picker;
 
 use anyhow::Result;
 use app::App;
-use std::sync::Arc;
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
@@ -16,6 +15,7 @@ use crossterm::{
 use event::EventLoop;
 use ratatui::prelude::*;
 use std::io;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -39,29 +39,49 @@ async fn main() -> Result<()> {
 
     let acp = Arc::new(acp::AcpClient::spawn(event_tx.clone(), profile.as_deref()).await?);
 
-    // Initialize ACP handshake
-    let init_result = acp.initialize().await;
-    if let Err(e) = &init_result {
-        eprintln!("ACP initialize failed: {}", e);
-    }
+    // Create app immediately — show picker with "Connecting..." while ACP initializes
+    let mut app = App::new(vec![]);
+    app.event_tx = Some(event_tx.clone());
 
-    // Fetch sessions for the picker
-    let sessions = acp.list_sessions().await.unwrap_or_default();
-
-    // Create app
-    let mut app = App::new(sessions);
-    app.event_tx = Some(event_tx);
-
-    // Extract model name from init result
-    if let Ok(ref init) = init_result {
-        if let Some(model) = init
-            .get("agent_info")
-            .and_then(|s| s.get("name"))
-            .and_then(|m| m.as_str())
-        {
-            app.model_name = model.to_string();
+    // Initialize ACP + fetch sessions in background
+    let acp_init = Arc::clone(&acp);
+    let event_tx_init = event_tx.clone();
+    tokio::spawn(async move {
+        // Initialize handshake
+        match acp_init.initialize().await {
+            Ok(init) => {
+                if let Some(model) = init
+                    .get("agentInfo")
+                    .or_else(|| init.get("agent_info"))
+                    .and_then(|s| s.get("name"))
+                    .and_then(|m| m.as_str())
+                {
+                    let _ = event_tx_init.send(event::AppEvent::SlashCommandResponse(
+                        format!("__model_name:{}", model),
+                    ));
+                }
+            }
+            Err(e) => {
+                let _ = event_tx_init.send(event::AppEvent::AcpError(
+                    format!("ACP initialize failed: {}", e),
+                ));
+            }
         }
-    }
+
+        // Fetch sessions for the picker
+        match acp_init.list_sessions().await {
+            Ok(sessions) => {
+                let _ = event_tx_init.send(event::AppEvent::SessionsLoaded(sessions));
+            }
+            Err(e) => {
+                let _ = event_tx_init.send(event::AppEvent::AcpError(
+                    format!("Failed to list sessions: {}", e),
+                ));
+            }
+        }
+
+        let _ = event_tx_init.send(event::AppEvent::AcpReady);
+    });
 
     let result = run(&mut terminal, &mut app, &mut events, acp.clone(), &cwd).await;
 
@@ -141,10 +161,20 @@ async fn run(
                 app.status = app::AgentStatus::Idle;
                 app.sys_msg("Session resumed.");
             }
-            event::AppEvent::SlashCommandResponse(text) => {
-                app.sys_msg(text);
+            event::AppEvent::SessionsLoaded(sessions) => {
+                app.sessions = sessions;
             }
-            _ => {}
+            event::AppEvent::AcpReady => {
+                // ACP is ready — picker can now accept Enter
+            }
+            event::AppEvent::SlashCommandResponse(text) => {
+                // Hack: model name arrives via this channel from init
+                if let Some(model) = text.strip_prefix("__model_name:") {
+                    app.model_name = model.to_string();
+                } else {
+                    app.sys_msg(text);
+                }
+            }
         }
 
         if app.should_quit() {
