@@ -284,7 +284,13 @@ async fn run(
                     }
                 });
             }
-            event::AppEvent::SessionsLoaded(sessions) => {
+            event::AppEvent::SessionsLoaded(mut sessions) => {
+                // Sort newest first by last_active, then started_at
+                sessions.sort_by(|a, b| {
+                    let a_time = a.last_active.or(a.started_at).unwrap_or(0.0);
+                    let b_time = b.last_active.or(b.started_at).unwrap_or(0.0);
+                    b_time.partial_cmp(&a_time).unwrap_or(std::cmp::Ordering::Equal)
+                });
                 app.sessions = sessions;
             }
             event::AppEvent::LoadMoreHistory => {

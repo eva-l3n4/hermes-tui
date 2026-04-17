@@ -62,14 +62,16 @@ fn format_elapsed(secs: f64) -> String {
     }
 }
 
-/// Format token count with comma separators.
+/// Format token count — compact for readability (e.g., 1.2k, 12k, 1.2M).
 fn format_tokens(n: u64) -> String {
     if n < 1_000 {
         n.to_string()
+    } else if n < 10_000 {
+        format!("{:.1}k", n as f64 / 1_000.0)
     } else if n < 1_000_000 {
-        format!("{},{:03}", n / 1_000, n % 1_000)
+        format!("{}k", n / 1_000)
     } else {
-        format!("{},{:03},{:03}", n / 1_000_000, (n / 1_000) % 1_000, n % 1_000)
+        format!("{:.1}M", n as f64 / 1_000_000.0)
     }
 }
 

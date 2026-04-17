@@ -48,7 +48,7 @@ fn draw_header(frame: &mut Frame, area: Rect) {
         Span::styled(
             "懐紙 Kaishi",
             Style::default()
-                .fg(Color::Magenta)
+                .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" — Sessions", Style::default().fg(Color::DarkGray)),
