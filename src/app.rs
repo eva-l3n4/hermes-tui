@@ -144,6 +144,7 @@ pub struct App {
     pub session_title: Option<String>,
     pub tick: u64,
     pub verbose: bool,
+    pub show_thinking: bool,
     pub animation: AnimationState,
 
     // Event channel for sending ACP requests
@@ -200,6 +201,7 @@ impl App {
             session_title: None,
             tick: 0,
             verbose: false,
+            show_thinking: false,
             animation: AnimationState::new(),
             event_tx: None,
             active_tools: Vec::new(),
@@ -556,6 +558,13 @@ impl App {
             // Scroll
             (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
                 self.scroll_offset = self.scroll_offset.saturating_add(10);
+            }
+
+            // Toggle thinking display (Ctrl+O — matches CC's expand pattern)
+            (KeyModifiers::CONTROL, KeyCode::Char('o')) => {
+                self.show_thinking = !self.show_thinking;
+                // Invalidate cache — thought messages render differently
+                self.line_cache.clear();
             }
             (_, KeyCode::PageUp) => {
                 self.scroll_offset = self.scroll_offset.saturating_add(20);

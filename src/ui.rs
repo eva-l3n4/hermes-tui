@@ -321,7 +321,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     while app.line_cache.len() < app.messages.len() {
         let idx = app.line_cache.len();
         let mut lines: Vec<Line> = Vec::new();
-        render_message(&mut lines, &app.messages[idx], inner_width, app.verbose, narrow);
+        render_message(&mut lines, &app.messages[idx], inner_width, app.verbose, app.show_thinking, narrow);
         lines.push(Line::from(""));
         lines = pre_wrap_lines(lines, inner_width);
         app.line_cache.push(lines);
@@ -373,17 +373,18 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         all_lines.push(Line::from(""));
     }
 
-    // Show pending thought (always show label, expand with verbose)
+    // Show pending thought (always show label, expand with show_thinking)
     if !app.pending_thought.is_empty() {
+        let hint = if app.show_thinking { "" } else { " (ctrl+o to expand)" };
         let label = Line::from(vec![
             Span::styled("  ○ ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                "thinking…",
+                format!("thinking…{}", hint),
                 Style::default().fg(Color::DarkGray).italic(),
             ),
         ]);
         all_lines.push(label);
-        if app.verbose {
+        if app.show_thinking {
             for line in app.pending_thought.lines() {
                 all_lines.push(Line::from(Span::styled(
                     format!("{}{}", indent(narrow), line),
@@ -590,7 +591,8 @@ fn render_message(
     lines: &mut Vec<Line>,
     msg: &ChatMessage,
     width: usize,
-    verbose: bool,
+    _verbose: bool,
+    show_thinking: bool,
     narrow: bool,
 ) {
     // Tool messages render with box-drawing frame
@@ -705,7 +707,7 @@ fn render_message(
 
     match msg.role {
         Role::Thought => {
-            if verbose {
+            if show_thinking {
                 let thought_lines: Vec<&str> = msg.content.lines().collect();
                 if thought_lines.is_empty() {
                     lines.push(Line::from(vec![
@@ -734,7 +736,7 @@ fn render_message(
                 lines.push(Line::from(vec![
                     Span::styled(format!("  {}", icon), Style::default().fg(icon_color)),
                     Span::styled(
-                        format!("({} lines — /verbose to expand)", line_count),
+                        format!("({} lines — ctrl+o to expand)", line_count),
                         Style::default().fg(Color::DarkGray).italic(),
                     ),
                 ]));
