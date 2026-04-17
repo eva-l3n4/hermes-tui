@@ -13,8 +13,10 @@ use crate::ui_picker;
 /// Spinner frames for the streaming indicator.
 const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-/// Indent prefix for message body lines.
-const INDENT: &str = "    ";
+/// Indent prefix for message body lines — adjusted by viewport width.
+fn indent(narrow: bool) -> &'static str {
+    if narrow { "  " } else { "    " }
+}
 
 /// Top-level draw — dispatches to the active screen, then overlays modal.
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -64,13 +66,16 @@ fn draw_chat(frame: &mut Frame, app: &mut App) {
 }
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let narrow = area.width < 60;
     let model = if app.model_name.is_empty() {
         "hermes"
     } else {
         &app.model_name
     };
 
-    let session_hint = if let Some(ref title) = app.session_title {
+    let session_hint = if narrow {
+        String::new() // Hide session info on narrow
+    } else if let Some(ref title) = app.session_title {
         format!(" │ {}", truncate(title, 30))
     } else if let Some(ref sid) = app.session_id {
         let short = if sid.len() > 8 { &sid[..8] } else { sid };
@@ -124,6 +129,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
 fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let inner_width = area.width.saturating_sub(2) as usize; // borders
+    let narrow = area.width < 60;
 
     // Invalidate cache on width or verbose change
     if app.cache_width != inner_width {
@@ -135,7 +141,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     while app.line_cache.len() < app.messages.len() {
         let idx = app.line_cache.len();
         let mut lines: Vec<Line> = Vec::new();
-        render_message(&mut lines, &app.messages[idx], inner_width, app.verbose);
+        render_message(&mut lines, &app.messages[idx], inner_width, app.verbose, narrow);
         lines.push(Line::from(""));
         lines = pre_wrap_lines(lines, inner_width);
         app.line_cache.push(lines);
@@ -172,7 +178,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         ]);
         all_lines.push(label);
 
-        render_markdown_lines(&mut all_lines, &app.pending_response, inner_width);
+        render_markdown_lines(&mut all_lines, &app.pending_response, inner_width, narrow);
 
         // Blinking cursor at end
         if app.tick % 4 < 2 {
@@ -198,7 +204,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         if app.verbose {
             for line in app.pending_thought.lines() {
                 all_lines.push(Line::from(Span::styled(
-                    format!("{}{}", INDENT, line),
+                    format!("{}{}", indent(narrow), line),
                     Style::default().fg(Color::DarkGray),
                 )));
             }
@@ -270,7 +276,7 @@ fn pre_wrap_lines(lines: Vec<Line<'static>>, max_width: usize) -> Vec<Line<'stat
     result
 }
 
-fn render_message(lines: &mut Vec<Line>, msg: &ChatMessage, width: usize, verbose: bool) {
+fn render_message(lines: &mut Vec<Line>, msg: &ChatMessage, width: usize, verbose: bool, narrow: bool) {
     // Tool messages render as a single compact line with status icon
     if msg.role == Role::Tool {
         let (icon, color) = if msg.content.starts_with("✓") {
@@ -313,27 +319,27 @@ fn render_message(lines: &mut Vec<Line>, msg: &ChatMessage, width: usize, verbos
 
     match msg.role {
         Role::Assistant => {
-            render_markdown_lines(lines, &msg.content, width);
+            render_markdown_lines(lines, &msg.content, width, narrow);
         }
         Role::Thought => {
             if verbose {
                 for text_line in msg.content.lines() {
                     lines.push(Line::from(Span::styled(
-                        format!("{}{}", INDENT, text_line),
+                        format!("{}{}", indent(narrow), text_line),
                         Style::default().fg(Color::DarkGray).italic(),
                     )));
                 }
             } else {
                 let line_count = msg.content.lines().count();
                 lines.push(Line::from(Span::styled(
-                    format!("{}({} lines — /verbose to expand)", INDENT, line_count),
+                    format!("{}({} lines — /verbose to expand)", indent(narrow), line_count),
                     Style::default().fg(Color::DarkGray).italic(),
                 )));
             }
         }
         _ => {
             for text_line in msg.content.lines() {
-                lines.push(Line::from(format!("{}{}", INDENT, text_line)));
+                lines.push(Line::from(format!("{}{}", indent(narrow), text_line)));
             }
         }
     }
@@ -341,7 +347,7 @@ fn render_message(lines: &mut Vec<Line>, msg: &ChatMessage, width: usize, verbos
 
 // ─── Markdown → ratatui Lines ────────────────────────────────────────────
 
-fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
+fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize, narrow: bool) {
     let mut in_code_block = false;
     let mut code_lang = String::new();
 
@@ -350,7 +356,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
         if raw_line.trim_start().starts_with("```") {
             if in_code_block {
                 lines.push(Line::from(Span::styled(
-                    format!("{}└─────", INDENT),
+                    format!("{}└─────", indent(narrow)),
                     Style::default().fg(Color::DarkGray),
                 )));
                 in_code_block = false;
@@ -358,9 +364,9 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
             } else {
                 code_lang = raw_line.trim_start().trim_start_matches('`').to_string();
                 let header = if code_lang.is_empty() {
-                    format!("{}┌─────", INDENT)
+                    format!("{}┌─────", indent(narrow))
                 } else {
-                    format!("{}┌───── {}", INDENT, code_lang)
+                    format!("{}┌───── {}", indent(narrow), code_lang)
                 };
                 lines.push(Line::from(Span::styled(
                     header,
@@ -373,7 +379,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
 
         if in_code_block {
             lines.push(Line::from(Span::styled(
-                format!("{}│ {}", INDENT, raw_line),
+                format!("{}│ {}", indent(narrow), raw_line),
                 Style::default().fg(Color::Green),
             )));
             continue;
@@ -384,7 +390,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
         // Headings
         if let Some(heading) = trimmed.strip_prefix("### ") {
             lines.push(Line::from(Span::styled(
-                format!("{}{}", INDENT, heading),
+                format!("{}{}", indent(narrow), heading),
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
@@ -393,7 +399,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
         }
         if let Some(heading) = trimmed.strip_prefix("## ") {
             lines.push(Line::from(Span::styled(
-                format!("{}{}", INDENT, heading),
+                format!("{}{}", indent(narrow), heading),
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
@@ -402,7 +408,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
         }
         if let Some(heading) = trimmed.strip_prefix("# ") {
             lines.push(Line::from(Span::styled(
-                format!("{}{}", INDENT, heading),
+                format!("{}{}", indent(narrow), heading),
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
@@ -413,7 +419,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
         // Horizontal rules
         if trimmed == "---" || trimmed == "***" || trimmed == "___" {
             lines.push(Line::from(Span::styled(
-                format!("{}────────────────────────────────", INDENT),
+                format!("{}────────────────────────────────", indent(narrow)),
                 Style::default().fg(Color::DarkGray),
             )));
             continue;
@@ -425,7 +431,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
             let extra_indent = " ".repeat(indent_level);
             let body = &trimmed[2..];
             let mut spans = vec![Span::styled(
-                format!("{}{}• ", INDENT, extra_indent),
+                format!("{}{}• ", indent(narrow), extra_indent),
                 Style::default().fg(Color::DarkGray),
             )];
             spans.extend(parse_inline_spans(body));
@@ -439,7 +445,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
             let extra_indent = " ".repeat(indent_level);
             let prefix_len = trimmed.len() - rest.len();
             let mut spans = vec![Span::styled(
-                format!("{}{}{}", INDENT, extra_indent, &trimmed[..prefix_len]),
+                format!("{}{}{}", indent(narrow), extra_indent, &trimmed[..prefix_len]),
                 Style::default().fg(Color::DarkGray),
             )];
             spans.extend(parse_inline_spans(rest));
@@ -450,7 +456,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
         // Blockquotes
         if let Some(quote) = trimmed.strip_prefix("> ") {
             lines.push(Line::from(vec![
-                Span::styled(format!("{}▎ ", INDENT), Style::default().fg(Color::Blue)),
+                Span::styled(format!("{}▎ ", indent(narrow)), Style::default().fg(Color::Blue)),
                 Span::styled(
                     quote.to_string(),
                     Style::default()
@@ -465,7 +471,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
         if trimmed.is_empty() {
             lines.push(Line::from(""));
         } else {
-            let mut spans = vec![Span::raw(INDENT.to_string())];
+            let mut spans = vec![Span::raw(indent(narrow).to_string())];
             spans.extend(parse_inline_spans(raw_line.trim_start()));
             lines.push(Line::from(spans));
         }
@@ -474,7 +480,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize) {
     // Close unclosed code block
     if in_code_block {
         lines.push(Line::from(Span::styled(
-            format!("{}└─────", INDENT),
+            format!("{}└─────", indent(narrow)),
             Style::default().fg(Color::DarkGray),
         )));
     }

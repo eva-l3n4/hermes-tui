@@ -10,6 +10,7 @@ use crate::event::SessionInfo;
 /// Draw the session picker screen.
 pub fn draw_picker(frame: &mut Frame, sessions: &[SessionInfo], selected: usize) {
     let area = frame.area();
+    let narrow = area.width < 60;
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -39,6 +40,12 @@ pub fn draw_picker(frame: &mut Frame, sessions: &[SessionInfo], selected: usize)
     lines.push(Line::from(""));
 
     // Existing sessions
+    let max_label = if narrow {
+        (area.width as usize).saturating_sub(8)
+    } else {
+        36
+    };
+
     for (i, session) in sessions.iter().enumerate() {
         let idx = i + 1; // offset by New Session
         let marker = if selected == idx { "  > " } else { "    " };
@@ -57,52 +64,11 @@ pub fn draw_picker(frame: &mut Frame, sessions: &[SessionInfo], selected: usize)
             session.session_id[..8.min(session.session_id.len())].to_string()
         };
 
-        // Relative time from last_active or started_at
-        let time_hint = session
-            .last_active
-            .or(session.started_at)
-            .map(format_relative_time)
-            .unwrap_or_default();
-
-        // Source badge
-        let source_badge = session
-            .source
-            .as_deref()
-            .map(|s| match s {
-                "acp" => "",
-                "cli" => " [cli]",
-                "discord" => " [discord]",
-                "telegram" => " [telegram]",
-                other => {
-                    // We can't return a formatted &str, handled below
-                    let _ = other;
-                    ""
-                }
-            })
-            .unwrap_or("");
-
-        // For unknown sources, build a owned string
-        let source_display = if source_badge.is_empty() {
-            session
-                .source
-                .as_deref()
-                .filter(|s| *s != "acp")
-                .map(|s| format!(" [{}]", s))
-                .unwrap_or_default()
+        let display_label = if label.len() > max_label {
+            format!("{}…", &label[..max_label.saturating_sub(1)])
         } else {
-            source_badge.to_string()
+            label
         };
-
-        let detail = format!(
-            "{}{}{}",
-            format_args!("{} msgs", session.history_len),
-            if time_hint.is_empty() {
-                String::new()
-            } else {
-                format!(", {}", time_hint)
-            },
-            source_display,
-        );
 
         let style = if selected == idx {
             Style::default()
@@ -112,26 +78,71 @@ pub fn draw_picker(frame: &mut Frame, sessions: &[SessionInfo], selected: usize)
             Style::default().fg(Color::White)
         };
 
-        let detail_style = if selected == idx {
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD)
+        if narrow {
+            // Narrow: just label, no details
+            lines.push(Line::from(Span::styled(
+                format!("{}{}", marker, display_label),
+                style,
+            )));
         } else {
-            Style::default().fg(Color::DarkGray)
-        };
+            // Relative time from last_active or started_at
+            let time_hint = session
+                .last_active
+                .or(session.started_at)
+                .map(format_relative_time)
+                .unwrap_or_default();
 
-        // Truncate label to fit
-        let max_label = 36;
-        let display_label = if label.len() > max_label {
-            format!("{}…", &label[..max_label - 1])
-        } else {
-            label
-        };
+            // Source badge
+            let source_badge = session
+                .source
+                .as_deref()
+                .map(|s| match s {
+                    "acp" => "",
+                    "cli" => " [cli]",
+                    "discord" => " [discord]",
+                    "telegram" => " [telegram]",
+                    other => {
+                        let _ = other;
+                        ""
+                    }
+                })
+                .unwrap_or("");
 
-        lines.push(Line::from(vec![
-            Span::styled(format!("{}{:<38}", marker, display_label), style),
-            Span::styled(format!("  {}", detail), detail_style),
-        ]));
+            let source_display = if source_badge.is_empty() {
+                session
+                    .source
+                    .as_deref()
+                    .filter(|s| *s != "acp")
+                    .map(|s| format!(" [{}]", s))
+                    .unwrap_or_default()
+            } else {
+                source_badge.to_string()
+            };
+
+            let detail = format!(
+                "{}{}{}",
+                format_args!("{} msgs", session.history_len),
+                if time_hint.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {}", time_hint)
+                },
+                source_display,
+            );
+
+            let detail_style = if selected == idx {
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled(format!("{}{:<38}", marker, display_label), style),
+                Span::styled(format!("  {}", detail), detail_style),
+            ]));
+        }
     }
 
     lines.push(Line::from(""));
