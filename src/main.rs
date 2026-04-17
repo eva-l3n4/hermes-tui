@@ -157,9 +157,26 @@ async fn run(
                 app.sys_msg("Session ready.");
             }
             event::AppEvent::SessionResumed(sid) => {
-                app.session_id = Some(sid);
+                app.session_id = Some(sid.clone());
                 app.status = app::AgentStatus::Idle;
-                app.sys_msg("Session resumed.");
+                app.sys_msg("Session resumed. Fetching context…");
+
+                // Auto-send /context to show the user what the agent remembers
+                let acp_ctx = acp.clone();
+                let event_tx_ctx = app.event_tx.as_ref().unwrap().clone();
+                tokio::spawn(async move {
+                    if let Ok(val) = acp_ctx.prompt("/context", &sid).await {
+                        let stop_reason = val
+                            .get("stopReason")
+                            .or_else(|| val.get("stop_reason"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("end_turn")
+                            .to_string();
+                        let _ = event_tx_ctx.send(
+                            event::AppEvent::PromptDone { stop_reason, usage: None },
+                        );
+                    }
+                });
             }
             event::AppEvent::SessionsLoaded(sessions) => {
                 app.sessions = sessions;
