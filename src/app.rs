@@ -1,5 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::text::Line as RatLine;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -85,11 +87,16 @@ pub struct App {
 
     // Active tool calls (for status display)
     pub active_tools: Vec<(String, String)>, // (id, name)
+    pub tool_msg_map: HashMap<String, usize>, // tool_call_id → message index
 
     // Input history
     pub input_history: Vec<String>,
     pub history_index: Option<usize>,
     saved_input: String,
+
+    // Rendered line cache (per-message, pre-wrapped)
+    pub line_cache: Vec<Vec<RatLine<'static>>>,
+    pub cache_width: usize,
 
     quit: bool,
 }
@@ -120,9 +127,12 @@ impl App {
             verbose: false,
             event_tx: None,
             active_tools: Vec::new(),
+            tool_msg_map: HashMap::new(),
             input_history: Vec::new(),
             history_index: None,
             saved_input: String::new(),
+            line_cache: Vec::new(),
+            cache_width: 0,
             quit: false,
         }
     }
@@ -632,6 +642,7 @@ impl App {
             }
             "/clear" => {
                 self.messages.clear();
+                self.line_cache.clear();
                 self.scroll_offset = 0;
                 true
             }
@@ -640,6 +651,7 @@ impl App {
                     Ok(sid) => {
                         self.session_id = Some(sid);
                         self.messages.clear();
+                        self.line_cache.clear();
                         self.session_title = None;
                         self.scroll_offset = 0;
                         self.sys_msg("New session started.");
@@ -660,6 +672,7 @@ impl App {
             }
             "/verbose" | "/v" => {
                 self.verbose = !self.verbose;
+                self.line_cache.clear();
                 self.sys_msg(format!(
                     "Verbose mode: {}",
                     if self.verbose { "on" } else { "off" }
@@ -702,12 +715,14 @@ impl App {
 
     pub fn handle_tool_start(&mut self, id: &str, name: &str, _kind: Option<&str>) {
         self.active_tools.push((id.to_string(), name.to_string()));
-        // Always show compact tool label
+        let idx = self.messages.len();
         self.messages.push(ChatMessage {
             role: Role::Tool,
             content: format!("⚙ {}", name),
             tokens: None,
         });
+        // Map tool ID → message index for in-place updates
+        self.tool_msg_map.insert(id.to_string(), idx);
         self.scroll_offset = 0;
     }
 
@@ -715,18 +730,44 @@ impl App {
         if status == "completed" || status == "error" {
             self.active_tools.retain(|(tid, _)| tid != id);
         }
-        if self.verbose {
-            if let Some(text) = content {
-                let preview = if text.len() > 200 {
-                    format!("{}...", &text[..200])
+
+        // Update the existing tool message in-place
+        if let Some(&msg_idx) = self.tool_msg_map.get(id) {
+            if msg_idx < self.messages.len() {
+                let name = self.messages[msg_idx]
+                    .content
+                    .trim_start_matches("⚙ ")
+                    .trim_start_matches("⠋ ")
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+
+                let new_content = if status == "completed" {
+                    format!("✓ {}", name)
+                } else if status == "error" {
+                    let detail = content
+                        .map(|t| {
+                            let preview = if t.len() > 100 { &t[..100] } else { t };
+                            format!(" — {}", preview)
+                        })
+                        .unwrap_or_default();
+                    format!("✗ {}{}", name, detail)
                 } else {
-                    text.to_string()
+                    // Still running — keep spinner
+                    format!("⚙ {}", name)
                 };
-                self.messages.push(ChatMessage {
-                    role: Role::Tool,
-                    content: format!("[{}] {}", status, preview),
-                    tokens: None,
-                });
+
+                self.messages[msg_idx].content = new_content;
+
+                // Invalidate cached rendering for this message
+                if msg_idx < self.line_cache.len() {
+                    self.line_cache.truncate(msg_idx);
+                }
+            }
+
+            if status == "completed" || status == "error" {
+                self.tool_msg_map.remove(id);
             }
         }
     }
@@ -753,6 +794,7 @@ impl App {
         }
         self.status = AgentStatus::Idle;
         self.active_tools.clear();
+        self.tool_msg_map.clear();
         self.scroll_offset = 0;
     }
 
@@ -788,6 +830,7 @@ impl App {
 
         // Clear the welcome message and "resuming" messages
         self.messages.clear();
+        self.line_cache.clear();
 
         for (role, content) in &history {
             let msg_role = match role.as_str() {

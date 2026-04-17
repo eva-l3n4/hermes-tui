@@ -17,8 +17,8 @@ const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧
 const INDENT: &str = "    ";
 
 /// Top-level draw — dispatches to the active screen, then overlays modal.
-pub fn draw(frame: &mut Frame, app: &App) {
-    match &app.screen {
+pub fn draw(frame: &mut Frame, app: &mut App) {
+    match &app.screen.clone() {
         Screen::Picker => {
             ui_picker::draw_picker(frame, &app.sessions, app.picker_selected);
         }
@@ -43,7 +43,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
 }
 
 /// Draw the chat view (status bar + messages + input).
-fn draw_chat(frame: &mut Frame, app: &App) {
+fn draw_chat(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
     let input_lines = app.input.lines().count().max(1);
@@ -122,15 +122,33 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(bar), area);
 }
 
-fn draw_messages(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let inner_width = area.width.saturating_sub(2) as usize; // borders
 
-    let mut all_lines: Vec<Line> = Vec::new();
-
-    for msg in &app.messages {
-        render_message(&mut all_lines, msg, inner_width);
-        all_lines.push(Line::from(""));
+    // Invalidate cache on width or verbose change
+    if app.cache_width != inner_width {
+        app.line_cache.clear();
+        app.cache_width = inner_width;
     }
+
+    // Grow cache to match message count (render new messages only)
+    while app.line_cache.len() < app.messages.len() {
+        let idx = app.line_cache.len();
+        let mut lines: Vec<Line> = Vec::new();
+        render_message(&mut lines, &app.messages[idx], inner_width, app.verbose);
+        lines.push(Line::from(""));
+        lines = pre_wrap_lines(lines, inner_width);
+        app.line_cache.push(lines);
+    }
+
+    // Build all_lines from cache
+    let mut all_lines: Vec<Line> = Vec::new();
+    for cached in &app.line_cache {
+        all_lines.extend(cached.iter().cloned());
+    }
+
+    // Track where dynamic (uncached) content begins
+    let cached_end = all_lines.len();
 
     // Render the in-progress streaming response
     if !app.pending_response.is_empty() {
@@ -157,8 +175,8 @@ fn draw_messages(frame: &mut Frame, app: &App, area: Rect) {
         all_lines.push(Line::from(""));
     }
 
-    // Show pending thought if verbose
-    if app.verbose && !app.pending_thought.is_empty() {
+    // Show pending thought (always show label, expand with verbose)
+    if !app.pending_thought.is_empty() {
         let label = Line::from(vec![
             Span::styled("  ○ ", Style::default().fg(Color::DarkGray)),
             Span::styled(
@@ -167,17 +185,23 @@ fn draw_messages(frame: &mut Frame, app: &App, area: Rect) {
             ),
         ]);
         all_lines.push(label);
-        for line in app.pending_thought.lines() {
-            all_lines.push(Line::from(Span::styled(
-                format!("{}{}", INDENT, line),
-                Style::default().fg(Color::DarkGray),
-            )));
+        if app.verbose {
+            for line in app.pending_thought.lines() {
+                all_lines.push(Line::from(Span::styled(
+                    format!("{}{}", INDENT, line),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
         }
         all_lines.push(Line::from(""));
     }
 
-    // ── Pre-wrap: split any line wider than inner_width ──────────────
-    all_lines = pre_wrap_lines(all_lines, inner_width);
+    // ── Pre-wrap: only wrap dynamic (uncached) lines ──────────────
+    if all_lines.len() > cached_end {
+        let dynamic = all_lines.split_off(cached_end);
+        let wrapped = pre_wrap_lines(dynamic, inner_width);
+        all_lines.extend(wrapped);
+    }
 
     let total_lines = all_lines.len() as u16;
     let visible_height = area.height.saturating_sub(2);
@@ -236,12 +260,31 @@ fn pre_wrap_lines(lines: Vec<Line<'static>>, max_width: usize) -> Vec<Line<'stat
     result
 }
 
-fn render_message(lines: &mut Vec<Line>, msg: &ChatMessage, width: usize) {
+fn render_message(lines: &mut Vec<Line>, msg: &ChatMessage, width: usize, verbose: bool) {
+    // Tool messages render as a single compact line with status icon
+    if msg.role == Role::Tool {
+        let (icon, color) = if msg.content.starts_with("✓") {
+            ("  ✓ ", Color::Green)
+        } else if msg.content.starts_with("✗") {
+            ("  ✗ ", Color::Red)
+        } else {
+            ("  ⚙ ", Color::DarkGray)
+        };
+        let name = msg.content
+            .trim_start_matches(['✓', '✗', '⚙', ' '])
+            .to_string();
+        lines.push(Line::from(vec![
+            Span::styled(icon, Style::default().fg(color)),
+            Span::styled(name, Style::default().fg(color)),
+        ]));
+        return;
+    }
+
     let (icon, color, label) = match msg.role {
         Role::User => ("  ❯ ", Color::Cyan, "you"),
         Role::Assistant => ("  ◆ ", Color::Magenta, "assistant"),
         Role::System => ("  ● ", Color::Yellow, "system"),
-        Role::Tool => ("  ⚙ ", Color::DarkGray, "tool"),
+        Role::Tool => unreachable!(),
         Role::Thought => ("  ○ ", Color::DarkGray, "thought"),
     };
 
@@ -264,9 +307,17 @@ fn render_message(lines: &mut Vec<Line>, msg: &ChatMessage, width: usize) {
             render_markdown_lines(lines, &msg.content, width);
         }
         Role::Thought => {
-            for text_line in msg.content.lines() {
+            if verbose {
+                for text_line in msg.content.lines() {
+                    lines.push(Line::from(Span::styled(
+                        format!("{}{}", INDENT, text_line),
+                        Style::default().fg(Color::DarkGray).italic(),
+                    )));
+                }
+            } else {
+                let line_count = msg.content.lines().count();
                 lines.push(Line::from(Span::styled(
-                    format!("{}{}", INDENT, text_line),
+                    format!("{}({} lines — /verbose to expand)", INDENT, line_count),
                     Style::default().fg(Color::DarkGray).italic(),
                 )));
             }
