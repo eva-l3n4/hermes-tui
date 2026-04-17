@@ -32,8 +32,90 @@ mod palette {
     pub const QUOTE: Color = Color::Blue;
 }
 
-/// Spinner frames for the streaming indicator.
-const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+/// Spinner glyph characters (CC-style).
+const GLYPHS: &[char] = &['·', '✢', '✳', '✶', '✻', '✽'];
+
+/// Build the bounce sequence: forward then reverse, skipping endpoints.
+fn bounce_sequence() -> Vec<char> {
+    let mut seq: Vec<char> = GLYPHS.to_vec();
+    seq.extend(GLYPHS.iter().rev().skip(1).take(GLYPHS.len() - 2));
+    seq // [· ✢ ✳ ✶ ✻ ✽ ✻ ✶ ✳ ✢]
+}
+
+/// Three-step shimmer: highlighted char, adjacent, and base.
+fn shimmer_color(char_idx: usize, highlight_pos: usize) -> Color {
+    let dist = if char_idx >= highlight_pos {
+        char_idx - highlight_pos
+    } else {
+        highlight_pos - char_idx
+    };
+    match dist {
+        0 => Color::White,    // highlight
+        1 => Color::Gray,     // adjacent
+        _ => Color::DarkGray, // base
+    }
+}
+
+/// Format elapsed seconds as "Xs" or "Xm Ys".
+fn format_elapsed(secs: f64) -> String {
+    let s = secs as u64;
+    if s < 60 {
+        format!("{}s", s)
+    } else {
+        format!("{}m {}s", s / 60, s % 60)
+    }
+}
+
+/// Render the animated spinner line (thinking/streaming/executing).
+fn render_spinner_line(app: &App) -> Option<Line<'static>> {
+    use crate::app::AgentPhase;
+
+    if app.animation.phase == AgentPhase::Idle {
+        return None;
+    }
+
+    let bounce = bounce_sequence();
+    let glyph = bounce[app.animation.frame % bounce.len()];
+
+    let label = match app.animation.phase {
+        AgentPhase::Thinking => "thinking",
+        AgentPhase::Streaming => "streaming",
+        AgentPhase::Executing => "executing",
+        AgentPhase::Idle => return None,
+    };
+
+    let elapsed = format_elapsed(app.animation.phase_start.elapsed().as_secs_f64());
+
+    // Build spans
+    let mut spans: Vec<Span> = Vec::new();
+
+    // Leading indent
+    spans.push(Span::raw("  "));
+
+    // Glyph (accent color)
+    spans.push(Span::styled(
+        glyph.to_string(),
+        Style::default().fg(palette::ACCENT_ASSISTANT),
+    ));
+
+    spans.push(Span::raw(" "));
+
+    // Shimmer label — each char gets its own span
+    for (i, ch) in label.chars().enumerate() {
+        spans.push(Span::styled(
+            ch.to_string(),
+            Style::default().fg(shimmer_color(i, app.animation.shimmer_pos)),
+        ));
+    }
+
+    // Separator + elapsed
+    spans.push(Span::styled(
+        format!(" · {}", elapsed),
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    Some(Line::from(spans))
+}
 
 /// Indent prefix for message body lines — adjusted by viewport width.
 fn indent(narrow: bool) -> &'static str {
@@ -111,13 +193,11 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             format!(" {}{}", model, session_hint)
         }
         AgentStatus::Thinking => {
-            let spinner = SPINNER[(app.tick as usize) % SPINNER.len()];
-            let tool_hint = if let Some((_, name)) = app.active_tools.last() {
-                format!(" {}", name)
+            if let Some(ref tool_name) = app.animation.active_tool {
+                format!(" {} > {}", model, tool_name)
             } else {
-                " thinking…".to_string()
-            };
-            format!(" {}{}{}", spinner, tool_hint, session_hint)
+                format!(" {} > working…", model)
+            }
         }
         AgentStatus::Error(e) => {
             format!(" ⚠ {}", truncate(e, 50))
@@ -265,6 +345,11 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         let dynamic = all_lines.split_off(cached_end);
         let wrapped = pre_wrap_lines(dynamic, inner_width);
         all_lines.extend(wrapped);
+    }
+
+    // Animated spinner line (not cached — rebuilt every frame)
+    if let Some(spinner_line) = render_spinner_line(app) {
+        all_lines.push(spinner_line);
     }
 
     let total_lines = all_lines.len() as u16;
