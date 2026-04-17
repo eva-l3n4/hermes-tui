@@ -302,26 +302,34 @@ fn pre_wrap_lines(lines: Vec<Line<'static>>, max_width: usize) -> Vec<Line<'stat
             result.push(line);
             continue;
         }
-        let style = line.spans.first().map(|s| s.style).unwrap_or_default();
-        let full: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
 
-        // Wrap by display width, not char count
-        let mut current = String::new();
-        let mut current_width = 0;
-        for ch in full.chars() {
-            let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-            if current_width + ch_width > max_width && !current.is_empty() {
-                result.push(Line::from(Span::styled(
-                    std::mem::take(&mut current),
-                    style,
-                )));
-                current_width = 0;
+        // Walk spans preserving each span's style across wrap boundaries
+        let mut row_spans: Vec<Span<'static>> = Vec::new();
+        let mut row_width: usize = 0;
+
+        for span in line.spans.into_iter() {
+            let span_style = span.style;
+            let mut chunk = String::new();
+
+            for ch in span.content.chars() {
+                let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                if row_width + ch_width > max_width && (!row_spans.is_empty() || !chunk.is_empty()) {
+                    // Flush current chunk into row_spans before breaking
+                    if !chunk.is_empty() {
+                        row_spans.push(Span::styled(std::mem::take(&mut chunk), span_style));
+                    }
+                    result.push(Line::from(std::mem::take(&mut row_spans)));
+                    row_width = 0;
+                }
+                chunk.push(ch);
+                row_width += ch_width;
             }
-            current.push(ch);
-            current_width += ch_width;
+            if !chunk.is_empty() {
+                row_spans.push(Span::styled(chunk, span_style));
+            }
         }
-        if !current.is_empty() {
-            result.push(Line::from(Span::styled(current, style)));
+        if !row_spans.is_empty() {
+            result.push(Line::from(row_spans));
         }
     }
     result
