@@ -419,7 +419,7 @@ impl AcpClient {
     ) -> Result<Vec<(String, String)>> {
         let result = self
             .request(
-                "hermes/get_session_history",
+                "_hermes/get_session_history",
                 Some(serde_json::json!({
                     "session_id": session_id,
                     "limit": limit,
