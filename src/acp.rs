@@ -339,7 +339,7 @@ impl AcpClient {
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>> {
         let result = self
-            .request("session_list", Some(serde_json::json!({})))
+            .request("session/list", Some(serde_json::json!({})))
             .await?;
         let sessions = result
             .get("sessions")
@@ -375,7 +375,7 @@ impl AcpClient {
     pub async fn new_session(&self, cwd: &str) -> Result<String> {
         let result = self
             .request(
-                "session_new",
+                "session/new",
                 Some(serde_json::json!({ "cwd": cwd })),
             )
             .await?;
@@ -389,7 +389,7 @@ impl AcpClient {
 
     pub async fn resume_session(&self, cwd: &str, session_id: &str) -> Result<()> {
         self.request(
-            "session_resume",
+            "session/resume",
             Some(serde_json::json!({
                 "cwd": cwd,
                 "session_id": session_id,
@@ -401,7 +401,7 @@ impl AcpClient {
 
     pub async fn prompt(&self, text: &str, session_id: &str) -> Result<Value> {
         self.request(
-            "session_prompt",
+            "session/prompt",
             Some(serde_json::json!({
                 "session_id": session_id,
                 "prompt": [{ "type": "text", "text": text }],
@@ -411,12 +411,11 @@ impl AcpClient {
     }
 
     pub async fn cancel(&self, session_id: &str) -> Result<()> {
-        self.request(
-            "session_cancel",
+        self.notify(
+            "session/cancel",
             Some(serde_json::json!({ "session_id": session_id })),
         )
-        .await?;
-        Ok(())
+        .await
     }
 
     /// Kill the subprocess on shutdown.
