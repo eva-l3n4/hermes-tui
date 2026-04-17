@@ -1079,22 +1079,33 @@ fn strip_numbered_prefix(s: &str) -> Option<&str> {
 }
 
 fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
-    let prompt_style = if app.status == AgentStatus::Idle {
+    let is_idle = app.status == AgentStatus::Idle;
+    let prompt_style = if is_idle {
         Style::default().fg(palette::ACCENT_USER)
     } else {
         Style::default().fg(palette::DIM)
     };
 
-    let title = if app.status == AgentStatus::Idle {
-        " ❯ "
+    let title = if is_idle { " ❯ " } else { " ⏳ " };
+
+    // Key hints in bottom border (only when idle)
+    let bottom_hint = if is_idle && app.input.is_empty() {
+        " esc quit · / commands "
+    } else if is_idle {
+        " esc quit · enter send "
     } else {
-        " ⏳ "
+        " ctrl+c cancel "
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(prompt_style)
-        .title(title);
+        .title(title)
+        .title_bottom(Line::from(Span::styled(
+            bottom_hint,
+            Style::default().fg(Color::DarkGray),
+        )));
 
     // Inner width available for text (subtract 2 for borders)
     let inner_width = area.width.saturating_sub(2) as usize;
@@ -1134,7 +1145,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
     // Show placeholder when input is empty
     let display_text = if app.input.is_empty() && app.status == AgentStatus::Idle {
-        "Type a message… (/help for commands)"
+        "Type a message…"
     } else {
         &app.input
     };
