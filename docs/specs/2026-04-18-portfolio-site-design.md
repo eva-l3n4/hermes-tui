@@ -100,15 +100,32 @@ No navigation bar — the page is short enough to scroll naturally. A subtle "Gi
   - Dark code background (`--code-bg`)
   - Rounded border with subtle `--blossom` border (`rgba(255,183,197,0.15)`)
   - Fake title bar with three dots (macOS-style window chrome)
-  - Content example:
+  - Content must accurately reflect Kaishi's actual rendering:
     ```
-    kaishi › What's in this project?
-    ⟡ Searching files...
-    This is a Rust TUI built with ratatui. It speaks
-    the ACP protocol to communicate with Hermes Agent.
-    ◆ 3 files searched · 247 tokens
+    ┌──────────────────────────────────────────────────────┐
+    │ claude-sonnet-4-6  │ [████░░░░░░] 42%    1.2k↑ 247↓ │  ← status bar (DarkGray bg)
+    ├──────────────────────────────────────────────────────┤
+    │  ❯ What's in this project?                          │  ← user (Cyan icon)
+    │                                                      │
+    │  ◆ This is a Rust TUI built with ratatui. It speaks │  ← assistant (Magenta icon)
+    │    the ACP protocol to communicate with Hermes...   │
+    │                                                      │
+    │    ┌─ ✓ search_files ──────────────────────          │  ← tool call (Green ✓, box-drawn)
+    │    │ Found 11 source files in src/                   │
+    │    └─────────────────────────────────────────        │
+    │                                                      │
+    │  ──── 1.2k in · 247 out · 95% cached · 3s ────     │  ← turn summary (DarkGray)
+    ├──────────────────────────────────────────────────────┤
+    │ >                                                    │  ← input area
+    └──────────────────────────────────────────────────────┘
     ```
-  - All in JetBrains Mono, with color-coded elements (user input in `--cream`, tool calls in `--muted`, response in `--blossom`)
+  - Color coding matches Kaishi's actual palette:
+    - `❯` user icon: Cyan
+    - `◆` assistant icon: Magenta
+    - `✓` tool success: Green (with box-drawing frame in DarkGray)
+    - Turn summary divider: DarkGray
+    - Status bar: DarkGray background, White text, Green/Yellow/Red context bar
+    - Borders: DarkGray
 
 ### 5. Get Started
 
