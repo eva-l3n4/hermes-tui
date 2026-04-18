@@ -11,7 +11,7 @@ use crate::event::{AppEvent, ApprovalOption, SessionInfo, Usage};
 /// All known slash commands for tab completion.
 const SLASH_COMMANDS: &[&str] = &[
     "/clear", "/compact", "/context", "/exit", "/help", "/model",
-    "/new", "/quit", "/reset", "/title", "/tools", "/usage",
+    "/new", "/quit", "/reset", "/save", "/title", "/tools", "/usage",
     "/verbose", "/version", "/yolo",
 ];
 
@@ -961,6 +961,7 @@ impl App {
                      /new             Start a new session\n\
                      /clear           Clear the screen\n\
                      /verbose         Toggle tool call details\n\
+                     /save [path]     Export session to markdown\n\
                      /usage           Show token usage\n\
                      /quit            Exit (also Ctrl+D)\n\
                      \n\
@@ -1020,7 +1021,11 @@ impl App {
                 false // fall through to send as prompt — server handles /reset
             }
             "/compact" => {
-                self.sys_msg("Compressing context…");
+                if parts.len() > 1 {
+                    self.sys_msg(format!("Compressing context (focus: {})…", parts[1]));
+                } else {
+                    self.sys_msg("Compressing context…");
+                }
                 false // fall through to send as prompt — server handles /compact
             }
             "/title" => {
@@ -1037,6 +1042,42 @@ impl App {
                     if self.yolo_mode { "on ⚡" } else { "off" }
                 ));
                 false // fall through to send as prompt — server handles /yolo
+            }
+            "/save" => {
+                let path = if parts.len() > 1 {
+                    std::path::PathBuf::from(parts[1])
+                } else {
+                    let secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    dirs::home_dir()
+                        .unwrap_or_default()
+                        .join(format!("kaishi-export-{secs}.md"))
+                };
+                let mut content = String::new();
+                for msg in &self.messages {
+                    let label = match msg.role {
+                        Role::User => "## User",
+                        Role::Assistant => "## Assistant",
+                        Role::System => "## System",
+                        Role::Thought => "## Thought",
+                        Role::Tool => "## Tool",
+                    };
+                    content.push_str(label);
+                    content.push_str("\n\n");
+                    content.push_str(&msg.content);
+                    content.push_str("\n\n---\n\n");
+                }
+                match std::fs::write(&path, &content) {
+                    Ok(()) => self.sys_msg(format!(
+                        "Saved {} messages to {}",
+                        self.messages.len(),
+                        path.display()
+                    )),
+                    Err(e) => self.sys_msg(format!("Save failed: {e}")),
+                }
+                true
             }
             _ => false,
         }
