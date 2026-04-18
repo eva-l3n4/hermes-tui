@@ -178,6 +178,21 @@ pub enum ModalState {
     },
 }
 
+/// Fuzzy subsequence match (case-insensitive).
+fn fuzzy_matches(query: &str, label: &str) -> bool {
+    if query.is_empty() { return true; }
+    let q = query.to_lowercase();
+    let l = label.to_lowercase();
+    let mut chars = q.chars();
+    let mut current = chars.next();
+    for c in l.chars() {
+        if let Some(qc) = current {
+            if c == qc { current = chars.next(); }
+        } else { break; }
+    }
+    current.is_none()
+}
+
 /// Application state.
 pub struct App {
     pub screen: Screen,
@@ -235,11 +250,22 @@ pub struct App {
     pub total_output_tokens: u64,
     pub prompt_count: u32,
 
+    // Context window tracking
+    pub context_used: u64,
+    pub context_max: u64,
+
+    // Effort level (0=low, 1=medium, 2=high)
+    pub effort_level: u8,
+
     // Approval bypass
     pub yolo_mode: bool,
 
     // External editor request
     pub editor_requested: bool,
+
+    // Undo: track message count before each prompt for rewind
+    pub undo_checkpoints: Vec<usize>,
+    pub last_esc: Option<std::time::Instant>,
 
     quit: bool,
 }
@@ -286,14 +312,50 @@ impl App {
             total_input_tokens: 0,
             total_output_tokens: 0,
             prompt_count: 0,
+            context_used: 0,
+            context_max: 200_000,  // default for Claude
+            effort_level: 2,       // default: high
             yolo_mode: false,
             editor_requested: false,
+            undo_checkpoints: Vec::new(),
+            last_esc: None,
             quit: false,
         }
     }
 
     pub fn close_modal(&mut self) {
         self.modal = ModalState::None;
+    }
+
+    pub fn undo_last_turn(&mut self) {
+        if let Some(checkpoint) = self.undo_checkpoints.pop() {
+            self.messages.truncate(checkpoint);
+            self.line_cache.truncate(checkpoint);
+            self.sys_msg("↩ Reverted last turn");
+        } else {
+            self.sys_msg("Nothing to undo");
+        }
+    }
+
+    pub fn build_palette_entries() -> Vec<PaletteEntry> {
+        vec![
+            PaletteEntry { label: "New session".into(), keybind: None, action: PaletteAction::SlashCommand("/new".into()) },
+            PaletteEntry { label: "Compact context".into(), keybind: None, action: PaletteAction::SlashCommand("/compact".into()) },
+            PaletteEntry { label: "Save session".into(), keybind: None, action: PaletteAction::SlashCommand("/save".into()) },
+            PaletteEntry { label: "Toggle YOLO mode".into(), keybind: Some("Shift+Tab".into()), action: PaletteAction::Keybind("toggle_yolo".into()) },
+            PaletteEntry { label: "Toggle verbose".into(), keybind: None, action: PaletteAction::SlashCommand("/verbose".into()) },
+            PaletteEntry { label: "Toggle thinking display".into(), keybind: Some("Ctrl+O".into()), action: PaletteAction::Keybind("toggle_thinking".into()) },
+            PaletteEntry { label: "Open external editor".into(), keybind: Some("Ctrl+G".into()), action: PaletteAction::Keybind("editor".into()) },
+            PaletteEntry { label: "Set effort: low".into(), keybind: None, action: PaletteAction::SetEffort(0) },
+            PaletteEntry { label: "Set effort: medium".into(), keybind: None, action: PaletteAction::SetEffort(1) },
+            PaletteEntry { label: "Set effort: high".into(), keybind: None, action: PaletteAction::SetEffort(2) },
+            PaletteEntry { label: "Clear screen".into(), keybind: Some("Ctrl+L".into()), action: PaletteAction::Keybind("clear".into()) },
+            PaletteEntry { label: "Show help".into(), keybind: None, action: PaletteAction::SlashCommand("/help".into()) },
+            PaletteEntry { label: "Show usage".into(), keybind: None, action: PaletteAction::SlashCommand("/usage".into()) },
+            PaletteEntry { label: "Show tools".into(), keybind: None, action: PaletteAction::SlashCommand("/tools".into()) },
+            PaletteEntry { label: "Undo last turn".into(), keybind: Some("Esc Esc".into()), action: PaletteAction::Keybind("undo".into()) },
+            PaletteEntry { label: "Quit".into(), keybind: Some("Ctrl+D".into()), action: PaletteAction::SlashCommand("/quit".into()) },
+        ]
     }
 
     pub fn should_quit(&self) -> bool {
@@ -606,6 +668,9 @@ impl App {
                 if self.handle_local_command(&text, acp, cwd).await {
                     return Ok(());
                 }
+
+                // Save undo checkpoint before adding the user message
+                self.undo_checkpoints.push(self.messages.len());
 
                 // Forward slash commands to ACP as prompts
                 // Add user message
@@ -1326,6 +1391,13 @@ impl App {
             u.elapsed_secs = elapsed;
             u
         });
+
+        // Track context window usage from the latest prompt
+        if let Some(ref u) = turn_usage {
+            // input_tokens (the delta) is the context sent in this prompt
+            // For context indicator, use the cumulative total as an approximation
+            self.context_used = self.total_input_tokens;
+        }
 
         self.flush_pending_response(turn_usage);
         self.status = AgentStatus::Idle;
