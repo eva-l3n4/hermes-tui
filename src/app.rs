@@ -766,7 +766,22 @@ impl App {
                                         .or_else(|| u.get("outputTokens"))
                                         .and_then(|v| v.as_u64())?,
                                     elapsed_secs: None,
+                                    last_prompt_tokens: None,
+                                    cache_read_tokens: None,
                                 })
+                            });
+                            // Extract _meta fields for context gauge
+                            let meta = val.get("_meta");
+                            let last_prompt = meta
+                                .and_then(|m| m.get("lastPromptTokens"))
+                                .and_then(|v| v.as_u64());
+                            let cache_read = meta
+                                .and_then(|m| m.get("cacheReadTokens"))
+                                .and_then(|v| v.as_u64());
+                            let usage = usage.map(|mut u| {
+                                u.last_prompt_tokens = last_prompt;
+                                u.cache_read_tokens = cache_read;
+                                u
                             });
                             let _ = event_tx.send(AppEvent::PromptDone { stop_reason, usage });
                         }
@@ -1697,11 +1712,16 @@ impl App {
             u
         });
 
-        // Track context window usage from the latest prompt
-        if let Some(ref _u) = turn_usage {
-            // input_tokens (the delta) is the context sent in this prompt
-            // For context indicator, use the cumulative total as an approximation
-            self.context_used = self.total_input_tokens;
+        // Track context window usage from the latest prompt.
+        // Use last_prompt_tokens from _meta (the actual context window fill
+        // for the most recent API call) instead of cumulative totals.
+        if let Some(ref u) = turn_usage {
+            if let Some(lp) = u.last_prompt_tokens {
+                self.context_used = lp;
+            } else {
+                // Fallback: per-turn delta is better than session cumulative
+                self.context_used = u.input_tokens;
+            }
         }
 
         self.flush_pending_response(turn_usage);

@@ -1,6 +1,6 @@
 [package]
 name = "kaishi"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 description = "懐紙 Kaishi — Terminal UI for Hermes Agent"
 
@@ -29,6 +29,7 @@ dirs = "6"
 anyhow = "1"
 unicode-width = "0.2"
 walkdir = "2"
+libc = "0.2"
 
 # Syntax highlighting in code blocks
 syntect = { version = "5", default-features = false, features = ["default-syntaxes", "default-themes", "regex-onig"] }

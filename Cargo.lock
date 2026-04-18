@@ -383,12 +383,13 @@ dependencies = [
 
 [[package]]
 name = "kaishi"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "anyhow",
  "crossterm",
  "dirs",
  "futures-lite",
+ "libc",
  "ratatui",
  "serde",
  "serde_json",

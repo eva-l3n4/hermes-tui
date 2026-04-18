@@ -72,6 +72,12 @@ impl AcpClient {
                     .unwrap_or_else(|_| std::process::Stdio::null())
             });
 
+        // Put the child in its own process group so we can kill the entire tree
+        // (hermes acp + its children like mcp-language-server) on shutdown.
+        cmd.process_group(0);
+        // Safety net: if Command/Child is dropped without explicit shutdown(), kill the child
+        cmd.kill_on_drop(true);
+
         let mut child = cmd.spawn().context("Failed to spawn `hermes acp`")?;
 
         let stdin = child.stdin.take().context("No stdin on child")?;
@@ -427,6 +433,8 @@ impl AcpClient {
                         input_tokens: u.get("input_tokens")?.as_u64()?,
                         output_tokens: u.get("output_tokens")?.as_u64()?,
                         elapsed_secs: None,
+                        last_prompt_tokens: None,
+                        cache_read_tokens: None,
                     })
                 });
                 let _ = event_tx.send(AppEvent::PromptDone { stop_reason, usage });
@@ -606,9 +614,21 @@ impl AcpClient {
         .await
     }
 
-    /// Kill the subprocess on shutdown.
+    /// Kill the subprocess and its entire process group on shutdown.
     pub async fn shutdown(&self) {
         let mut child = self.child.lock().await;
+        // Kill the entire process group (hermes acp + its children like mcp-language-server)
+        if let Some(pid) = child.id() {
+            unsafe {
+                // Negative PID = kill process group
+                libc::kill(-(pid as i32), libc::SIGTERM);
+            }
+            // Give children a moment to exit gracefully, then force kill
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+        }
         let _ = child.kill().await;
     }
 }

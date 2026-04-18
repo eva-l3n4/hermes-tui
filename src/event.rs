@@ -9,6 +9,12 @@ pub struct Usage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub elapsed_secs: Option<f64>,
+    /// Actual prompt size of the most recent API call (from server _meta).
+    /// This is the real context window fill — unlike input_tokens which is
+    /// session-cumulative across all API calls.
+    pub last_prompt_tokens: Option<u64>,
+    /// Cache read tokens for the most recent API call.
+    pub cache_read_tokens: Option<u64>,
 }
 
 /// An option in an approval request.

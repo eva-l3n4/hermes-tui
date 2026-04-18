@@ -105,16 +105,30 @@ fn format_tokens(n: u64) -> String {
 
 /// Render a turn completion summary as a dim divider line.
 fn render_turn_summary(usage: &Usage, width: usize) -> Line<'static> {
-    let in_tok = format_tokens(usage.input_tokens);
+    // Prefer last_prompt_tokens (actual context window fill) over input_tokens
+    // (per-turn cumulative delta across all API calls in the turn).
+    let in_tok = match usage.last_prompt_tokens {
+        Some(lp) if lp > 0 => format_tokens(lp),
+        _ => format_tokens(usage.input_tokens),
+    };
     let out_tok = format_tokens(usage.output_tokens);
     let elapsed = usage.elapsed_secs
         .map(format_elapsed)
         .unwrap_or_default();
 
+    // Show cache hit ratio if available
+    let cache_info = match (usage.last_prompt_tokens, usage.cache_read_tokens) {
+        (Some(lp), Some(cr)) if lp > 0 && cr > 0 => {
+            let pct = (cr as f64 / lp as f64 * 100.0) as u16;
+            format!(" · {}% cached", pct)
+        }
+        _ => String::new(),
+    };
+
     let content = if elapsed.is_empty() {
-        format!("{} in · {} out", in_tok, out_tok)
+        format!("{} in · {} out{}", in_tok, out_tok, cache_info)
     } else {
-        format!("{} in · {} out · {}", in_tok, out_tok, elapsed)
+        format!("{} in · {} out{} · {}", in_tok, out_tok, cache_info, elapsed)
     };
 
     // Center with ── dashes

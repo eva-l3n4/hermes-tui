@@ -155,9 +155,22 @@ async fn main() -> Result<()> {
         let _ = event_tx_init.send(event::AppEvent::AcpReady);
     });
 
-    let result = run(&mut terminal, &mut app, &mut events, acp.clone(), &cli.cwd, cli.profile.as_deref()).await;
+    // Run the TUI event loop, but also listen for SIGTERM/SIGINT so we always
+    // clean up child processes even if the terminal is killed externally.
+    let result = {
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to register SIGTERM handler");
+        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+            .expect("failed to register SIGINT handler");
 
-    // Cleanup
+        tokio::select! {
+            r = run(&mut terminal, &mut app, &mut events, acp.clone(), &cli.cwd, cli.profile.as_deref()) => r,
+            _ = sigterm.recv() => Ok(()),
+            _ = sigint.recv() => Ok(()),
+        }
+    };
+
+    // Cleanup — runs on normal quit (/quit, Ctrl+D, Esc) AND signal-based exit
     acp.shutdown().await;
     disable_raw_mode()?;
     execute!(
