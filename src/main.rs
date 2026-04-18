@@ -174,6 +174,69 @@ async fn main() -> Result<()> {
     result
 }
 
+/// Suspend TUI, open $EDITOR with current input, restore TUI.
+fn open_external_editor(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+) -> Result<()> {
+    let editor = std::env::var("EDITOR")
+        .or_else(|_| std::env::var("VISUAL"))
+        .unwrap_or_else(|_| "vi".to_string());
+
+    // Write current input to a temp file
+    let tmp_dir = std::env::temp_dir();
+    let tmp_path = tmp_dir.join("kaishi-edit.md");
+    std::fs::write(&tmp_path, &app.input)?;
+
+    // Suspend TUI
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    // Run editor
+    let status = std::process::Command::new(&editor)
+        .arg(&tmp_path)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status();
+
+    // Restore TUI regardless of editor result
+    enable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        EnterAlternateScreen,
+        EnableMouseCapture
+    )?;
+    terminal.hide_cursor()?;
+    terminal.clear()?;
+
+    // Update input with edited content
+    match status {
+        Ok(s) if s.success() => {
+            if let Ok(content) = std::fs::read_to_string(&tmp_path) {
+                let trimmed = content.trim_end().to_string();
+                app.cursor = trimmed.len();
+                app.input = trimmed;
+            }
+        }
+        Ok(s) => {
+            app.sys_msg(format!("Editor exited with status {s}"));
+        }
+        Err(e) => {
+            app.sys_msg(format!("Failed to open editor '{}': {e}", editor));
+        }
+    }
+
+    let _ = std::fs::remove_file(&tmp_path);
+    app.line_cache.clear();
+    Ok(())
+}
+
 async fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
@@ -191,6 +254,12 @@ async fn run(
         match events.next().await? {
             event::AppEvent::Key(key) => {
                 app.handle_key(key, &acp, cwd).await?;
+
+                // Handle external editor request (must happen after key handler returns)
+                if app.editor_requested {
+                    app.editor_requested = false;
+                    open_external_editor(terminal, app)?;
+                }
             }
             event::AppEvent::Tick => {
                 app.tick();

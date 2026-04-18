@@ -203,6 +203,9 @@ pub struct App {
     // Approval bypass
     pub yolo_mode: bool,
 
+    // External editor request
+    pub editor_requested: bool,
+
     quit: bool,
 }
 
@@ -249,6 +252,7 @@ impl App {
             total_output_tokens: 0,
             prompt_count: 0,
             yolo_mode: false,
+            editor_requested: false,
             quit: false,
         }
     }
@@ -640,6 +644,12 @@ impl App {
                 // Invalidate cache — thought messages render differently
                 self.line_cache.clear();
             }
+
+            // Open external editor (Ctrl+G)
+            (KeyModifiers::CONTROL, KeyCode::Char('g')) if self.status == AgentStatus::Idle => {
+                self.editor_requested = true;
+                return Ok(());
+            }
             (_, KeyCode::PageUp) => {
                 self.scroll_offset = self.scroll_offset.saturating_add(20);
             }
@@ -986,6 +996,7 @@ impl App {
                      Word jump: Alt+Left/Right\n\
                      Thinking: Ctrl+O toggle expand\n\
                      YOLO:    Shift+Tab toggle bypass\n\
+                     Editor:  Ctrl+G open $EDITOR\n\
                      Tab: complete /commands\n\
                      \n\
                      Shell escape:\n\
