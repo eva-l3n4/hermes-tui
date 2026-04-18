@@ -505,7 +505,7 @@ impl App {
                     return Ok(());
                 }
 
-                // Save to history
+                // Save to history (slash commands excluded)
                 if !text.starts_with('/') {
                     self.input_history.push(text.clone());
                 }
@@ -514,6 +514,46 @@ impl App {
 
                 self.input.clear();
                 self.cursor = 0;
+
+                // Shell escape: !command runs directly in a subprocess
+                if let Some(shell_cmd) = text.strip_prefix('!') {
+                    let shell_cmd = shell_cmd.trim();
+                    if shell_cmd.is_empty() {
+                        self.sys_msg("Usage: !<command>  (e.g. !cargo test)");
+                    } else {
+                        self.sys_msg(format!("$ {shell_cmd}"));
+                        match std::process::Command::new("sh")
+                            .args(["-c", shell_cmd])
+                            .current_dir(cwd)
+                            .output()
+                        {
+                            Ok(output) => {
+                                let stdout = String::from_utf8_lossy(&output.stdout);
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                let mut result = String::new();
+                                if !stdout.is_empty() {
+                                    result.push_str(&stdout);
+                                }
+                                if !stderr.is_empty() {
+                                    if !result.is_empty() {
+                                        result.push('\n');
+                                    }
+                                    result.push_str(&stderr);
+                                }
+                                if result.is_empty() {
+                                    result.push_str("(no output)");
+                                }
+                                // Wrap in a code block for proper rendering
+                                self.sys_msg(format!("```\n{}\n```", result.trim_end()));
+                            }
+                            Err(e) => {
+                                self.sys_msg(format!("Shell error: {e}"));
+                            }
+                        }
+                    }
+                    self.line_cache.clear();
+                    return Ok(());
+                }
 
                 // Try local slash commands first
                 if self.handle_local_command(&text, acp, cwd).await {
@@ -924,6 +964,10 @@ impl App {
                      Word jump: Alt+Left/Right\n\
                      Thinking: Ctrl+O toggle expand\n\
                      Tab: complete /commands\n\
+                     \n\
+                     Shell escape:\n\
+                     \n\
+                     !<cmd>   Run a shell command (e.g. !cargo test)\n\
                      \n\
                      Unrecognized /commands are forwarded to the server."
                         .to_string(),
