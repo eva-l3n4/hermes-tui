@@ -1127,9 +1127,8 @@ impl App {
                 (KeyCode::Up, _) => {
                     *selected = selected.saturating_sub(1);
                 }
-                (KeyCode::Down, _) => {
-                    if *selected + 1 < filtered.len() { *selected += 1; }
-                }
+                (KeyCode::Down, _)
+                    if *selected + 1 < filtered.len() => { *selected += 1; }
                 (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
                     query.insert(*cursor, c);
                     *cursor += 1;
@@ -1137,15 +1136,14 @@ impl App {
                     let all = Self::build_palette_entries();
                     *filtered = all.into_iter().filter(|e| fuzzy_matches(query, &e.label)).collect();
                 }
-                (KeyCode::Backspace, _) => {
-                    if *cursor > 0 {
+                (KeyCode::Backspace, _)
+                    if *cursor > 0 => {
                         *cursor -= 1;
                         query.remove(*cursor);
                         *selected = 0;
                         let all = Self::build_palette_entries();
                         *filtered = all.into_iter().filter(|e| fuzzy_matches(query, &e.label)).collect();
                     }
-                }
                 _ => {}
             }
         }
@@ -1242,14 +1240,13 @@ impl App {
                     *match_index = self.input_history.iter()
                         .position(|h| h.to_lowercase().contains(&query.to_lowercase()));
                 }
-                (KeyCode::Backspace, _) => {
-                    if *cursor > 0 {
+                (KeyCode::Backspace, _)
+                    if *cursor > 0 => {
                         *cursor -= 1;
                         query.remove(*cursor);
                         *match_index = self.input_history.iter()
                             .position(|h| h.to_lowercase().contains(&query.to_lowercase()));
                     }
-                }
                 _ => {}
             }
         }
@@ -1276,9 +1273,8 @@ impl App {
                 KeyCode::Up => {
                     *selected = selected.saturating_sub(1);
                 }
-                KeyCode::Down => {
-                    if *selected + 1 < entries.len() { *selected += 1; }
-                }
+                KeyCode::Down
+                    if *selected + 1 < entries.len() => { *selected += 1; }
                 KeyCode::Char(c) => {
                     query.push(c);
                     *selected = 0;
