@@ -850,9 +850,68 @@ fn render_message(
 
 // ─── Markdown → ratatui Lines ────────────────────────────────────────────
 
+/// Render accumulated table rows as aligned columns, then clear the buffer.
+fn flush_table<'a>(rows: &mut Vec<Vec<String>>, lines: &mut Vec<Line<'a>>, narrow: bool) {
+    if rows.is_empty() {
+        return;
+    }
+
+    // Compute column widths
+    let num_cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let mut col_widths = vec![0usize; num_cols];
+    for row in rows.iter() {
+        for (j, cell) in row.iter().enumerate() {
+            if j < num_cols {
+                col_widths[j] = col_widths[j].max(cell.len());
+            }
+        }
+    }
+
+    let ind = indent(narrow);
+
+    for (row_idx, row) in rows.iter().enumerate() {
+        let mut spans: Vec<Span> = vec![Span::raw(ind.to_string())];
+
+        for (j, cell) in row.iter().enumerate() {
+            let width = col_widths.get(j).copied().unwrap_or(cell.len());
+            let padded = format!("{:<width$}", cell, width = width);
+
+            if j > 0 {
+                spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            }
+
+            let style = if row_idx == 0 {
+                // Header row: bold
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            spans.push(Span::styled(padded, style));
+        }
+
+        lines.push(Line::from(spans));
+
+        // Separator after header
+        if row_idx == 0 {
+            let sep: String = col_widths
+                .iter()
+                .map(|w| "─".repeat(*w))
+                .collect::<Vec<_>>()
+                .join("─┼─");
+            lines.push(Line::from(Span::styled(
+                format!("{}{}", ind, sep),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+    }
+
+    rows.clear();
+}
+
 fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize, narrow: bool) {
     let mut in_code_block = false;
     let mut code_lang = String::new();
+    let mut table_rows: Vec<Vec<String>> = Vec::new();
 
     for raw_line in text.lines() {
         // Fenced code blocks
@@ -962,6 +1021,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize, narro
 
         // Blockquotes
         if let Some(quote) = trimmed.strip_prefix("> ") {
+            flush_table(&mut table_rows, lines, narrow);
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{}▎ ", indent(narrow)),
@@ -976,6 +1036,27 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize, narro
             ]));
             continue;
         }
+
+        // Pipe-delimited tables: accumulate rows, render on flush
+        if trimmed.starts_with('|') && trimmed.ends_with('|') {
+            // Skip separator rows (| --- | --- |) but keep for detection
+            let is_separator = trimmed
+                .trim_matches('|')
+                .split('|')
+                .all(|cell| cell.trim().chars().all(|c| c == '-' || c == ':' || c == ' '));
+            if !is_separator {
+                let cells: Vec<String> = trimmed
+                    .trim_matches('|')
+                    .split('|')
+                    .map(|c| c.trim().to_string())
+                    .collect();
+                table_rows.push(cells);
+            }
+            continue;
+        }
+
+        // If we were accumulating table rows but this line isn't a table line, flush
+        flush_table(&mut table_rows, lines, narrow);
 
         // Regular paragraph
         if trimmed.is_empty() {
@@ -994,6 +1075,9 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize, narro
             Style::default().fg(Color::DarkGray),
         )));
     }
+
+    // Flush any remaining table rows
+    flush_table(&mut table_rows, lines, narrow);
 }
 
 /// Parse inline markdown: **bold**, *italic*, `code`
