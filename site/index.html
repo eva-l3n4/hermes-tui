@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>懐紙 Kaishi — Terminal UI for Hermes Agent</title>
+  <title>懐紙 Kaishi—Terminal UI for Hermes Agent</title>
   <meta name="description" content="A beautiful terminal UI for conversing with Hermes Agent. Built in Rust with ratatui.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -75,7 +75,7 @@
       z-index: 1;
     }
 
-    /* letter-spacing adds trailing space — compensate to optically center */
+    /* letter-spacing adds trailing space—compensate to optically center */
     .hero-name {
       padding-left: 6px;
     }
@@ -135,7 +135,7 @@
       background: var(--surface-alt);
     }
 
-    /* Gradient transitions between sections — no hard color cuts */
+    /* Gradient transitions between sections—no hard color cuts */
     .section--fade-from-hero {
       background: linear-gradient(180deg, var(--blossom) 0%, var(--dusk-warm) 15%, var(--surface) 40%, var(--surface) 100%);
     }
@@ -397,7 +397,7 @@
       </p>
       <p style="margin-top: 16px;">
         Built in Rust with <a href="https://ratatui.rs" target="_blank" rel="noopener">ratatui</a>.
-        Syntax highlighting via syntect. No Electron, no web view, no runtime — just a 4MB binary
+        Syntax highlighting via syntect. No Electron, no web view, no runtime—just a 4MB binary
         that starts in under 50ms.
         Named for the paper held beneath cherry blossoms to catch what falls.
       </p>
@@ -411,19 +411,19 @@
       <div class="features">
         <div class="feature-card">
           <h3>Streaming</h3>
-          <p>Tokens arrive over JSON-RPC and render as they land — thinking spinners, live markdown reflow, tool calls that update in place. No buffering.</p>
+          <p>Tokens arrive over JSON-RPC and render as they land—thinking spinners, live markdown reflow, tool calls that update in place. No buffering.</p>
         </div>
         <div class="feature-card">
           <h3>Syntax Highlighting</h3>
-          <p>Fenced code blocks pass through syntect with the base16-eighties.dark theme. Rust, Python, TOML, YAML — 200+ grammars, zero configuration.</p>
+          <p>Fenced code blocks pass through syntect with the base16-eighties.dark theme. Rust, Python, TOML, YAML—200+ grammars, zero configuration.</p>
         </div>
         <div class="feature-card">
           <h3>Session Continuity</h3>
-          <p>Sessions persist across restarts. The picker shows titles, timestamps, and message counts — select one and the full history replays into view.</p>
+          <p>Sessions persist across restarts. The picker shows titles, timestamps, and message counts—select one and the full history replays into view.</p>
         </div>
         <div class="feature-card">
           <h3>File Mentions</h3>
-          <p>Type <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--blossom);">@</code> to fuzzy-search your project tree. Selected files attach as context — no copy-paste, no leaving the conversation.</p>
+          <p>Type <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--blossom);">@</code> to fuzzy-search your project tree. Selected files attach as context—no copy-paste, no leaving the conversation.</p>
         </div>
       </div>
     </div>
@@ -440,7 +440,7 @@
         The TUI never blocks.
       </p>
       <p style="margin-top: 16px;">
-        Rendering is immediate-mode via ratatui — each frame redraws from state, no retained widget tree.
+        Rendering is immediate-mode via ratatui—each frame redraws from state, no retained widget tree.
         A dual-rate tick system drives the UI: fast ticks (50ms) for spinner animation during streaming,
         slow ticks (500ms) at idle. Markdown is parsed to styled spans at ingestion time and cached;
         the viewport only renders visible lines.
