@@ -310,15 +310,21 @@ async fn run(
                 app.status = app::AgentStatus::Idle;
                 app.sys_msg("Session ready.");
 
-                // Query the actual model name for display
+                // Fetch session list to get the model name for this new session
                 let acp_model = acp.clone();
                 let event_tx_model = app.event_tx.as_ref().unwrap().clone();
+                let new_sid = sid.clone();
                 tokio::spawn(async move {
-                    if let Ok(result) = acp_model.prompt("/model", &sid).await {
-                        if let Some(text) = result.get("final_response")
-                            .or_else(|| result.get("stop_reason"))
-                            .and_then(|_| None::<&str>)  // just need the side effect
-                        { let _ = text; }
+                    if let Ok(sessions) = acp_model.list_sessions().await {
+                        if let Some(s) = sessions.iter().find(|s| s.session_id == new_sid) {
+                            if !s.model.is_empty() {
+                                let _ = event_tx_model.send(
+                                    event::AppEvent::SlashCommandResponse(
+                                        format!("__model_name:{}", s.model),
+                                    ),
+                                );
+                            }
+                        }
                     }
                 });
             }
