@@ -75,6 +75,11 @@
       z-index: 1;
     }
 
+    /* letter-spacing adds trailing space — compensate to optically center */
+    .hero-name {
+      padding-left: 6px;
+    }
+
     .hero-tagline {
       font-family: 'Inter', sans-serif;
       font-size: clamp(13px, 1.8vw, 16px);
@@ -128,6 +133,19 @@
 
     .section--surface-alt {
       background: var(--surface-alt);
+    }
+
+    /* Gradient transitions between sections — no hard color cuts */
+    .section--fade-from-hero {
+      background: linear-gradient(180deg, var(--blossom) 0%, var(--dusk-warm) 15%, var(--surface) 40%, var(--surface) 100%);
+    }
+
+    .section--fade-surface-to-alt {
+      background: linear-gradient(180deg, var(--surface) 0%, var(--surface-alt) 100%);
+    }
+
+    .section--fade-alt-to-surface {
+      background: linear-gradient(180deg, var(--surface-alt) 0%, var(--surface) 100%);
     }
 
     .section h2 {
@@ -269,6 +287,10 @@
     }
 
     /* ── Get Started ──────────────────────────────────── */
+    .section--fade-surface-to-bookend {
+      background: linear-gradient(180deg, var(--surface) 0%, var(--surface-alt) 100%);
+    }
+
     .section--bookend {
       background: linear-gradient(180deg, var(--surface-alt), var(--dusk-deep));
       text-align: center;
@@ -363,46 +385,74 @@
   </section>
 
   <!-- ════ What is Kaishi? ════ -->
-  <section class="section section--surface">
+  <section class="section section--fade-from-hero">
     <div class="section-inner">
       <h2>What is Kaishi?</h2>
       <p>
         Kaishi is a terminal UI for conversing with
-        <a href="https://github.com/nousresearch/hermes-agent" target="_blank" rel="noopener">Hermes Agent</a>.
-        Built in Rust with ratatui, it speaks the ACP protocol — streaming
-        responses in real time, highlighting code with syntect, and managing
-        sessions so you can pick up right where you left off.
+        <a href="https://github.com/nousresearch/hermes-agent" target="_blank" rel="noopener">Hermes Agent</a> —
+        an AI agent that lives in your terminal. It speaks the
+        <a href="https://github.com/anthropics/agent-protocol" target="_blank" rel="noopener">Agent Communication Protocol</a>
+        over stdio, rendering streaming markdown as it arrives, token by token.
+      </p>
+      <p style="margin-top: 16px;">
+        Built in Rust with <a href="https://ratatui.rs" target="_blank" rel="noopener">ratatui</a>.
+        Syntax highlighting via syntect. No Electron, no web view, no runtime — just a 4MB binary
+        that starts in under 50ms.
+        Named for the paper held beneath cherry blossoms to catch what falls.
       </p>
     </div>
   </section>
 
   <!-- ════ Features ════ -->
-  <section class="section section--surface-alt">
+  <section class="section section--fade-surface-to-alt">
     <div class="section-inner">
       <h2>Features</h2>
       <div class="features">
         <div class="feature-card">
           <h3>Streaming</h3>
-          <p>Real-time token flow with animated thinking indicators. Watch responses arrive live.</p>
+          <p>Tokens arrive over JSON-RPC and render as they land — thinking spinners, live markdown reflow, tool calls that update in place. No buffering.</p>
         </div>
         <div class="feature-card">
           <h3>Syntax Highlighting</h3>
-          <p>Code blocks rendered with syntect and the base16-eighties theme. Reads like an editor.</p>
+          <p>Fenced code blocks pass through syntect with the base16-eighties.dark theme. Rust, Python, TOML, YAML — 200+ grammars, zero configuration.</p>
         </div>
         <div class="feature-card">
-          <h3>Session Management</h3>
-          <p>Pick up conversations where you left off. Session picker with history replay.</p>
+          <h3>Session Continuity</h3>
+          <p>Sessions persist across restarts. The picker shows titles, timestamps, and message counts — select one and the full history replays into view.</p>
         </div>
         <div class="feature-card">
           <h3>File Mentions</h3>
-          <p>Type @ to attach files with fuzzy autocomplete. Context without copy-paste.</p>
+          <p>Type <code style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--blossom);">@</code> to fuzzy-search your project tree. Selected files attach as context — no copy-paste, no leaving the conversation.</p>
         </div>
       </div>
     </div>
   </section>
 
+  <!-- ════ Under the Hood ════ -->
+  <section class="section section--fade-alt-to-surface">
+    <div class="section-inner">
+      <h2>Under the Hood</h2>
+      <p>
+        Kaishi spawns Hermes as a child process and speaks ACP over stdin/stdout —
+        a JSON-RPC 2.0 wire protocol designed for agent communication. Every tool call,
+        every thinking block, every token delta arrives as a typed event on an async channel.
+        The TUI never blocks.
+      </p>
+      <p style="margin-top: 16px;">
+        Rendering is immediate-mode via ratatui — each frame redraws from state, no retained widget tree.
+        A dual-rate tick system drives the UI: fast ticks (50ms) for spinner animation during streaming,
+        slow ticks (500ms) at idle. Markdown is parsed to styled spans at ingestion time and cached;
+        the viewport only renders visible lines.
+      </p>
+      <p style="margin-top: 16px;">
+        ~5,300 lines of Rust. Eleven source files. Compiles to a 4MB static binary.
+      </p>
+    </div>
+  </section>
+
   <!-- ════ Terminal Preview ════ -->
-  <section class="section section--surface">
+  <section class="section section--fade-surface-to-bookend">
     <div class="section-inner">
       <h2>See it in action</h2>
       <div class="terminal">
@@ -451,7 +501,10 @@
 
   <!-- ════ Footer ════ -->
   <footer class="footer">
-    <p>Built with 🌸</p>
+    <p>Built with 🌸 and <a href="https://ratatui.rs" target="_blank" rel="noopener" style="color: var(--blossom); text-decoration: none; border-bottom: 1px solid var(--dusk-warm);">ratatui</a></p>
+    <p style="margin-top: 8px; font-size: 12px;">
+      <a href="https://github.com/eva-l3n4/kaishi" target="_blank" rel="noopener" style="color: var(--muted); text-decoration: none;">github.com/eva-l3n4/kaishi</a>
+    </p>
   </footer>
 
 </body>
