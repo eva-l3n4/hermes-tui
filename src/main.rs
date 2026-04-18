@@ -51,8 +51,8 @@ fn parse_args() -> CliArgs {
             }
             "--help" | "-h" => {
                 eprintln!(
-                    "hermes-tui {}\n\n\
-                     Usage: hermes-tui [OPTIONS]\n\n\
+ "kaishi {}\n\n\
+    Usage: kaishi [OPTIONS]\n\n\
                      Options:\n  \
                        --profile, -p <name>   Hermes profile to use (env: HERMES_PROFILE)\n  \
                        --cwd, -C <path>       Working directory for sessions\n  \

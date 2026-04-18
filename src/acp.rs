@@ -64,7 +64,7 @@ impl AcpClient {
                 // Log ACP stderr to a file so it doesn't corrupt the TUI
                 let log_dir = dirs::data_local_dir()
                     .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join("hermes-tui");
+                    .join("kaishi");
                 let _ = std::fs::create_dir_all(&log_dir);
                 let log_path = log_dir.join("acp.log");
                 std::fs::File::create(&log_path)
@@ -101,7 +101,7 @@ impl AcpClient {
                     if let Ok(mut f) = std::fs::OpenOptions::new()
                         .create(true)
                         .append(true)
-                        .open("/tmp/hermes-tui-debug.jsonl")
+                        .open("/tmp/kaishi-debug.jsonl")
                     {
                         let _ = writeln!(f, "{}", line);
                     }
@@ -379,7 +379,7 @@ impl AcpClient {
             Some(serde_json::json!({
                 "protocolVersion": 1,
                 "clientInfo": {
-                    "name": "hermes-tui",
+                    "name": "kaishi",
                     "version": env!("CARGO_PKG_VERSION"),
                 },
             })),
