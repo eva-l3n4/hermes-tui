@@ -9,7 +9,10 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{AgentStatus, App, ChatMessage, ModalState, Role, Screen};
+use crate::ui_effort;
 use crate::ui_modal;
+use crate::ui_palette;
+use crate::ui_search;
 use crate::ui_picker;
 
 // ─── Syntax highlighting (lazy-initialized) ──────────────────────
@@ -37,7 +40,7 @@ fn syntax_theme() -> &'static Theme {
 }
 
 // ─── Palette (terminal-native — inherits from your theme) ──────
-mod palette {
+pub(crate) mod palette {
     use ratatui::style::Color;
 
     pub const TEXT: Color = Color::White;
@@ -214,15 +217,24 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
     }
 
-    // Modal overlay (drawn on top of any screen)
-    if let ModalState::Approval {
-        ref command,
-        ref options,
-        selected,
-        ..
-    } = app.modal
-    {
-        ui_modal::draw_approval_modal(frame, command, options, selected);
+    // Modal overlays (drawn on top of any screen)
+    match &app.modal {
+        ModalState::Approval { command, options, selected, .. } => {
+            ui_modal::draw_approval_modal(frame, command, options, *selected);
+        }
+        ModalState::CommandPalette { .. } => {
+            ui_palette::draw_command_palette(frame, app);
+        }
+        ModalState::EffortSlider { .. } => {
+            ui_effort::draw_effort_slider(frame, app);
+        }
+        ModalState::ReverseSearch { .. } => {
+            ui_search::draw_reverse_search(frame, app);
+        }
+        ModalState::FileAutocomplete { .. } => {
+            // TODO: file autocomplete popup
+        }
+        ModalState::None => {}
     }
 }
 
@@ -268,6 +280,29 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         left_spans.push(Span::styled(
             "│ ⚡yolo ",
             Style::default().bg(bg).fg(Color::Yellow),
+        ));
+    }
+
+    // Effort level indicator (when not high/default)
+    if app.effort_level < 2 {
+        let label = match app.effort_level { 0 => "low", _ => "med" };
+        left_spans.push(Span::styled(
+            format!("│ ◆{} ", label),
+            Style::default().bg(bg).fg(palette::DIM),
+        ));
+    }
+
+    // Context window health indicator
+    if !narrow && app.context_max > 0 && app.context_used > 0 {
+        let pct = (app.context_used as f64 / app.context_max as f64 * 100.0) as u16;
+        let filled = (pct / 10) as usize;
+        let bar: String = "█".repeat(filled.min(10)) + &"░".repeat(10usize.saturating_sub(filled));
+        let color = if pct > 85 { palette::ERROR }
+                    else if pct > 70 { Color::Yellow }
+                    else { palette::SUCCESS };
+        left_spans.push(Span::styled(
+            format!("│ [{bar}] {pct}% "),
+            Style::default().bg(bg).fg(color),
         ));
     }
 

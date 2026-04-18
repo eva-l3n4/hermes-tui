@@ -2,8 +2,11 @@ mod acp;
 mod app;
 mod event;
 mod ui;
+mod ui_effort;
 mod ui_modal;
+mod ui_palette;
 mod ui_picker;
+mod ui_search;
 
 use anyhow::Result;
 use app::App;

@@ -957,6 +957,21 @@ impl App {
                     .unwrap_or(self.input.len());
             }
 
+            // Esc: double-tap to undo, single for future use
+            (_, KeyCode::Esc) => {
+                let now = std::time::Instant::now();
+                if let Some(last) = self.last_esc {
+                    if now.duration_since(last).as_millis() < 500 {
+                        self.last_esc = None;
+                        if self.status == AgentStatus::Idle {
+                            self.undo_last_turn();
+                        }
+                        return Ok(());
+                    }
+                }
+                self.last_esc = Some(now);
+            }
+
             _ => {}
         }
 
