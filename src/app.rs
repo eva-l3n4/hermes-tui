@@ -10,7 +10,7 @@ use crate::event::{AppEvent, ApprovalOption, SessionInfo, Usage};
 
 /// All known slash commands for tab completion.
 const SLASH_COMMANDS: &[&str] = &[
-    "/clear", "/compact", "/context", "/exit", "/help", "/model",
+    "/clear", "/compact", "/context", "/effort", "/exit", "/help", "/model",
     "/new", "/quit", "/reset", "/save", "/title", "/tools", "/usage",
     "/verbose", "/version", "/yolo",
 ];
@@ -423,9 +423,14 @@ impl App {
         acp: &Arc<AcpClient>,
         cwd: &str,
     ) -> Result<()> {
-        // Modal takes priority
-        if let ModalState::Approval { .. } = &self.modal {
-            return self.handle_modal_key(key, acp).await;
+        // Modal overlays take priority
+        match &self.modal {
+            ModalState::Approval { .. } => return self.handle_modal_key(key, acp).await,
+            ModalState::CommandPalette { .. } => return self.handle_palette_key(key, acp, cwd).await,
+            ModalState::EffortSlider { .. } => return self.handle_effort_key(key).await,
+            ModalState::ReverseSearch { .. } => return self.handle_reverse_search_key(key).await,
+            ModalState::FileAutocomplete { .. } => return self.handle_file_autocomplete_key(key).await,
+            ModalState::None => {}
         }
 
         match self.screen {
@@ -588,6 +593,26 @@ impl App {
             // Ctrl+D: always quit
             (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
                 self.quit = true;
+            }
+
+            // Ctrl+P: command palette
+            (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
+                let entries = Self::build_palette_entries();
+                self.modal = ModalState::CommandPalette {
+                    query: String::new(),
+                    cursor: 0,
+                    selected: 0,
+                    filtered: entries,
+                };
+            }
+
+            // Ctrl+R: reverse history search
+            (KeyModifiers::CONTROL, KeyCode::Char('r')) => {
+                self.modal = ModalState::ReverseSearch {
+                    query: String::new(),
+                    cursor: 0,
+                    match_index: None,
+                };
             }
 
             // Multiline: Shift+Enter, Alt+Enter, or Ctrl+J inserts newline
@@ -1026,6 +1051,198 @@ impl App {
         Ok(())
     }
 
+    // ---- Command palette key handler -----------------------------------------
+
+    async fn handle_palette_key(
+        &mut self,
+        key: KeyEvent,
+        acp: &Arc<AcpClient>,
+        cwd: &str,
+    ) -> Result<()> {
+        if let ModalState::CommandPalette { query, cursor, selected, filtered } = &mut self.modal {
+            match (key.code, key.modifiers) {
+                (KeyCode::Esc, _) => self.close_modal(),
+                (KeyCode::Enter, _) => {
+                    if let Some(entry) = filtered.get(*selected).cloned() {
+                        self.close_modal();
+                        self.execute_palette_action(entry.action, acp, cwd).await?;
+                    }
+                }
+                (KeyCode::Up, _) => {
+                    *selected = selected.saturating_sub(1);
+                }
+                (KeyCode::Down, _) => {
+                    if *selected + 1 < filtered.len() { *selected += 1; }
+                }
+                (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                    query.insert(*cursor, c);
+                    *cursor += 1;
+                    *selected = 0;
+                    let all = Self::build_palette_entries();
+                    *filtered = all.into_iter().filter(|e| fuzzy_matches(query, &e.label)).collect();
+                }
+                (KeyCode::Backspace, _) => {
+                    if *cursor > 0 {
+                        *cursor -= 1;
+                        query.remove(*cursor);
+                        *selected = 0;
+                        let all = Self::build_palette_entries();
+                        *filtered = all.into_iter().filter(|e| fuzzy_matches(query, &e.label)).collect();
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    async fn execute_palette_action(
+        &mut self,
+        action: PaletteAction,
+        acp: &Arc<AcpClient>,
+        cwd: &str,
+    ) -> Result<()> {
+        match action {
+            PaletteAction::SlashCommand(cmd) => {
+                self.handle_local_command(&cmd, acp, cwd).await;
+            }
+            PaletteAction::Keybind(name) => match name.as_str() {
+                "toggle_yolo" => {
+                    self.yolo_mode = !self.yolo_mode;
+                    let label = if self.yolo_mode { "on" } else { "off" };
+                    self.sys_msg(format!("Bypass: {label}"));
+                    if let Some(ref sid) = self.session_id {
+                        let sid = sid.clone();
+                        let acp = Arc::clone(acp);
+                        tokio::spawn(async move { let _ = acp.prompt("/yolo", &sid).await; });
+                    }
+                }
+                "toggle_thinking" => {
+                    self.show_thinking = !self.show_thinking;
+                    self.line_cache.clear();
+                }
+                "editor" => { self.editor_requested = true; }
+                "clear" => {
+                    self.messages.clear();
+                    self.line_cache.clear();
+                }
+                "undo" => { self.undo_last_turn(); }
+                _ => {}
+            },
+            PaletteAction::SetEffort(level) => {
+                self.effort_level = level;
+                let name = match level { 0 => "low", 1 => "medium", _ => "high" };
+                self.sys_msg(format!("Effort set to {name}"));
+            }
+        }
+        Ok(())
+    }
+
+    // ---- Effort slider key handler -------------------------------------------
+
+    async fn handle_effort_key(&mut self, key: KeyEvent) -> Result<()> {
+        if let ModalState::EffortSlider { level } = &mut self.modal {
+            match key.code {
+                KeyCode::Left => { *level = level.saturating_sub(1); }
+                KeyCode::Right => { *level = (*level + 1).min(2); }
+                KeyCode::Enter => {
+                    self.effort_level = *level;
+                    let name = match *level { 0 => "low", 1 => "medium", _ => "high" };
+                    self.close_modal();
+                    self.sys_msg(format!("Effort set to {name}"));
+                }
+                KeyCode::Esc => { self.close_modal(); }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    // ---- Reverse search key handler ------------------------------------------
+
+    async fn handle_reverse_search_key(&mut self, key: KeyEvent) -> Result<()> {
+        if let ModalState::ReverseSearch { query, cursor, match_index } = &mut self.modal {
+            match (key.code, key.modifiers) {
+                (KeyCode::Esc, _) => { self.close_modal(); }
+                (KeyCode::Enter, _) => {
+                    if let Some(idx) = match_index {
+                        if let Some(entry) = self.input_history.get(*idx) {
+                            self.input = entry.clone();
+                            self.cursor = self.input.len();
+                        }
+                    }
+                    self.close_modal();
+                }
+                (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
+                    // Ctrl+R again: search next (older) match
+                    let start = match_index.map(|i| i + 1).unwrap_or(0);
+                    *match_index = self.input_history.iter().skip(start)
+                        .position(|h| h.to_lowercase().contains(&query.to_lowercase()))
+                        .map(|i| i + start);
+                }
+                (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                    query.insert(*cursor, c);
+                    *cursor += 1;
+                    *match_index = self.input_history.iter()
+                        .position(|h| h.to_lowercase().contains(&query.to_lowercase()));
+                }
+                (KeyCode::Backspace, _) => {
+                    if *cursor > 0 {
+                        *cursor -= 1;
+                        query.remove(*cursor);
+                        *match_index = self.input_history.iter()
+                            .position(|h| h.to_lowercase().contains(&query.to_lowercase()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    // ---- File autocomplete key handler (placeholder) -------------------------
+
+    async fn handle_file_autocomplete_key(&mut self, key: KeyEvent) -> Result<()> {
+        if let ModalState::FileAutocomplete { query, cursor_in_input, selected, entries, .. } = &mut self.modal {
+            match key.code {
+                KeyCode::Esc => { self.close_modal(); }
+                KeyCode::Enter => {
+                    if let Some(path) = entries.get(*selected).cloned() {
+                        // Replace @query with the file path
+                        let at_start = *cursor_in_input;
+                        let at_end = at_start + 1 + query.len();
+                        let safe_end = at_end.min(self.input.len());
+                        self.input.replace_range(at_start..safe_end, &path);
+                        self.cursor = at_start + path.len();
+                    }
+                    self.close_modal();
+                }
+                KeyCode::Up => {
+                    *selected = selected.saturating_sub(1);
+                }
+                KeyCode::Down => {
+                    if *selected + 1 < entries.len() { *selected += 1; }
+                }
+                KeyCode::Char(c) => {
+                    query.push(c);
+                    *selected = 0;
+                    let q = query.clone();
+                    entries.retain(|e| fuzzy_matches(&q, e));
+                }
+                KeyCode::Backspace => {
+                    if !query.is_empty() {
+                        query.pop();
+                        *selected = 0;
+                    } else {
+                        self.close_modal();
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     // ---- Local slash commands ------------------------------------------------
 
     async fn handle_local_command(&mut self, text: &str, acp: &Arc<AcpClient>, cwd: &str) -> bool {
@@ -1068,6 +1285,10 @@ impl App {
                 ));
                 true
             }
+            "/effort" => {
+                self.modal = ModalState::EffortSlider { level: self.effort_level };
+                true
+            }
             "/help" | "/h" | "/?" => {
                 self.sys_msg(
                     "Local commands:\n\
@@ -1089,12 +1310,16 @@ impl App {
                      /title [name]    Set or show session title\n\
                      /version         Show Hermes version\n\
                      /yolo            Toggle approval bypass\n\
+                     /effort          Set reasoning effort\n\
                      \n\
                      Keys:\n\
                      \n\
-                     Scroll: PgUp/PgDn, Ctrl+U, mouse wheel\n\
-                     Cancel: Ctrl+C during generation\n\
-                     Clear:  Ctrl+L\n\
+                     Ctrl+P:   Command palette\n\
+                     Ctrl+R:   Reverse history search\n\
+                     Esc Esc:  Undo last turn\n\
+                     Scroll:   PgUp/PgDn, Ctrl+U, mouse wheel\n\
+                     Cancel:   Ctrl+C during generation\n\
+                     Clear:    Ctrl+L\n\
                      Newline: Ctrl+J or Shift+Enter\n\
                      History: Up/Down arrows\n\
                      Word jump: Alt+Left/Right\n\
