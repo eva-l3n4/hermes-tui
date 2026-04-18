@@ -103,7 +103,7 @@ No navigation bar — the page is short enough to scroll naturally. A subtle "Gi
   - Content must accurately reflect Kaishi's actual rendering:
     ```
     ┌──────────────────────────────────────────────────────┐
-    │ claude-sonnet-4-6  │ [████░░░░░░] 42%    1.2k↑ 247↓ │  ← status bar (DarkGray bg)
+    │ claude-sonnet-4-6  │ [████░░░░░░] 42%               │  ← status bar (DarkGray bg)
     ├──────────────────────────────────────────────────────┤
     │  ❯ What's in this project?                          │  ← user (Cyan icon)
     │                                                      │
