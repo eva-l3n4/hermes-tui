@@ -1,5 +1,5 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
 
 use crate::app::{App, ModalState};
 use crate::ui::palette;
@@ -16,9 +16,10 @@ pub fn draw_file_popup(f: &mut Frame, app: &App) {
     };
 
     let area = f.area();
-    // Position: bottom of screen, above input, full width
-    let max_items = entries.len().min(8) as u16;
-    let height = max_items + 2; // borders
+    // Height: cap at 10 rows of entries so the popup doesn't eat the
+    // whole screen, but also never allocate more rows than we have.
+    let max_items = entries.len().min(10) as u16;
+    let height = (max_items + 2).max(3); // at least 3 for "Scanning…" state
     let width = area.width.min(60);
     let y = area.height.saturating_sub(height + 4); // above input
     let x = 2;
@@ -36,19 +37,14 @@ pub fn draw_file_popup(f: &mut Frame, app: &App) {
 
     let items: Vec<ListItem> = entries
         .iter()
-        .enumerate()
-        .take(8)
-        .map(|(i, path)| {
-            let style = if i == *selected {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(palette::ACCENT_ASSISTANT)
-            } else {
-                Style::default()
-            };
-            ListItem::new(format!(" {}", path)).style(style)
-        })
+        .map(|path| ListItem::new(format!(" {}", path)))
         .collect();
 
-    f.render_widget(List::new(items), inner);
+    let list = List::new(items).highlight_style(
+        Style::default()
+            .fg(Color::Black)
+            .bg(palette::ACCENT_ASSISTANT),
+    );
+    let mut state = ListState::default().with_selected(Some(*selected));
+    f.render_stateful_widget(list, inner, &mut state);
 }
