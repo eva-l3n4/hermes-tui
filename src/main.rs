@@ -478,6 +478,9 @@ async fn run(
                     }
                 }
             }
+            event::AppEvent::SubagentUpdate(_update) => {
+                // TODO (Task 5): render task line in transcript
+            }
         }
 
         // Draw after processing event

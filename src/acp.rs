@@ -8,7 +8,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
-use crate::event::{AppEvent, ApprovalOption, SessionInfo, Usage};
+use crate::event::{AppEvent, ApprovalOption, SessionInfo, SubagentEventKind, SubagentUpdate, Usage};
 
 /// Strip ASCII NUL bytes that can sneak into content from clipboard pastes,
 /// malformed streams, or shell output. Nulls corrupt clipboard round-trips
@@ -246,6 +246,12 @@ impl AcpClient {
                     let update = params.get("update").unwrap_or(params);
                     Self::handle_session_update(update, event_tx);
                 }
+            } else if method == "_hermes/subagent_update" {
+                if let Some(params) = &msg.params {
+                    if let Some(update) = Self::parse_subagent_update(params) {
+                        let _ = event_tx.send(AppEvent::SubagentUpdate(update));
+                    }
+                }
             }
         }
     }
@@ -454,6 +460,41 @@ impl AcpClient {
         }
     }
 
+    fn parse_subagent_update(params: &Value) -> Option<SubagentUpdate> {
+        let parent_session_id = params.get("session_id")?.as_str()?.to_string();
+        let child_session_id = params.get("child_session_id")?.as_str()?.to_string();
+        let task_index = params.get("task_index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let task_count = params.get("task_count").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+        let event_type = params.get("event_type")?.as_str()?;
+
+        let kind = match event_type {
+            "start" => SubagentEventKind::Start {
+                goal: params.get("goal").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            },
+            "thinking" => SubagentEventKind::Thinking {
+                text: params.get("preview").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            },
+            "tool" => SubagentEventKind::Tool {
+                name: params.get("tool_name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                preview: params.get("preview").and_then(|v| v.as_str()).map(String::from),
+            },
+            "complete" => SubagentEventKind::Complete {
+                status: params.get("status").and_then(|v| v.as_str()).unwrap_or("success").to_string(),
+                summary: params.get("summary").and_then(|v| v.as_str()).map(String::from),
+                duration_seconds: params.get("duration_seconds").and_then(|v| v.as_f64()),
+            },
+            _ => return None,
+        };
+
+        Some(SubagentUpdate {
+            parent_session_id,
+            child_session_id,
+            task_index,
+            task_count,
+            kind,
+        })
+    }
+
     // ---- High-level ACP operations -----------------------------------------
 
     pub async fn initialize(&self) -> Result<Value> {
@@ -641,5 +682,56 @@ impl AcpClient {
             }
         }
         let _ = child.kill().await;
+    }
+}
+
+#[cfg(test)]
+mod subagent_parse_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_start_event() {
+        let params = json!({
+            "session_id": "parent-sid",
+            "child_session_id": "child-sid",
+            "task_index": 0,
+            "task_count": 1,
+            "event_type": "start",
+            "goal": "do the thing",
+        });
+        let update = AcpClient::parse_subagent_update(&params).unwrap();
+        assert_eq!(update.child_session_id, "child-sid");
+        assert!(matches!(update.kind, SubagentEventKind::Start { ref goal } if goal == "do the thing"));
+    }
+
+    #[test]
+    fn parses_complete_event() {
+        let params = json!({
+            "session_id": "p", "child_session_id": "c",
+            "task_index": 0, "task_count": 1,
+            "event_type": "complete",
+            "status": "success",
+            "summary": "all done",
+            "duration_seconds": 12.3,
+        });
+        let update = AcpClient::parse_subagent_update(&params).unwrap();
+        match update.kind {
+            SubagentEventKind::Complete { status, summary, duration_seconds } => {
+                assert_eq!(status, "success");
+                assert_eq!(summary.as_deref(), Some("all done"));
+                assert_eq!(duration_seconds, Some(12.3));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn ignores_unknown_event_type() {
+        let params = json!({
+            "session_id": "p", "child_session_id": "c",
+            "event_type": "mystery",
+        });
+        assert!(AcpClient::parse_subagent_update(&params).is_none());
     }
 }

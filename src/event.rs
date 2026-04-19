@@ -98,6 +98,41 @@ pub enum AppEvent {
 
     // Async file autocomplete scan results
     FileScanResult(Vec<String>),
+
+    /// Update from a running subagent (delegated child session).
+    SubagentUpdate(SubagentUpdate),
+}
+
+/// Update from a running subagent (delegated child session).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct SubagentUpdate {
+    pub parent_session_id: String,
+    pub child_session_id: String,
+    pub task_index: usize,
+    pub task_count: usize,
+    pub kind: SubagentEventKind,
+}
+
+/// Discriminator for a subagent lifecycle event.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum SubagentEventKind {
+    Start {
+        goal: String,
+    },
+    Thinking {
+        text: String,
+    },
+    Tool {
+        name: String,
+        preview: Option<String>,
+    },
+    Complete {
+        status: String,       // "success" or "failed"
+        summary: Option<String>,
+        duration_seconds: Option<f64>,
+    },
 }
 
 pub struct EventLoop {
