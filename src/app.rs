@@ -1842,6 +1842,43 @@ impl App {
 
         self.scroll_offset = 0;
     }
+
+    /// Exit the current chat session and return to the picker.
+    /// Clears per-session state; keeps app-level settings (effort, yolo,
+    /// verbose, input history). Caller is responsible for triggering a
+    /// session list refresh via `AppEvent::SessionsLoaded` if desired.
+    pub fn return_to_picker(&mut self) {
+        self.screen = Screen::Picker;
+        self.modal = ModalState::None;
+
+        // Clear per-session chat state
+        self.session_id = None;
+        self.session_title = None;
+        self.messages.clear();
+        self.line_cache.clear();
+        self.pending_response.clear();
+        self.pending_thought.clear();
+        self.scroll_offset = 0;
+        self.status = AgentStatus::Idle;
+        self.active_tools.clear();
+        self.tool_msg_map.clear();
+
+        // Reset per-session counters
+        self.total_input_tokens = 0;
+        self.total_output_tokens = 0;
+        self.prompt_count = 0;
+        self.context_used = 0;
+        self.undo_checkpoints.clear();
+
+        // Reset picker scroll to top
+        self.picker_selected = 0;
+        self.picker_scroll_offset = 0;
+
+        // Clear history pagination state
+        self.history_total = 0;
+        self.history_loaded = 0;
+        self.loading_more_history = false;
+    }
 }
 
 /// Produce a short, readable summary of tool input by tool name.
@@ -2012,4 +2049,78 @@ fn truncate_summary(s: &str, max: usize) -> String {
         .map(|(i, _)| i)
         .unwrap_or(clean.len());
     format!("{}…", &clean[..end])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chat_app_fixture() -> App {
+        let mut app = App::new(vec![]);
+        app.screen = Screen::Chat;
+        app.session_id = Some("sess-abc".into());
+        app.session_title = Some("Old title".into());
+        app.messages.push(ChatMessage {
+            role: Role::User,
+            content: "hello".into(),
+            tokens: None,
+        });
+        app.pending_response = "streaming…".into();
+        app.pending_thought = "thinking…".into();
+        app.scroll_offset = 42;
+        app.total_input_tokens = 100;
+        app.total_output_tokens = 50;
+        app.prompt_count = 3;
+        app.context_used = 1234;
+        app.undo_checkpoints.push(1);
+        app
+    }
+
+    #[test]
+    fn return_to_picker_switches_screen() {
+        let mut app = chat_app_fixture();
+        app.return_to_picker();
+        assert_eq!(app.screen, Screen::Picker);
+    }
+
+    #[test]
+    fn return_to_picker_clears_session_state() {
+        let mut app = chat_app_fixture();
+        app.return_to_picker();
+        assert!(app.session_id.is_none());
+        assert!(app.session_title.is_none());
+        assert!(app.messages.is_empty());
+        assert_eq!(app.pending_response, "");
+        assert_eq!(app.pending_thought, "");
+        assert_eq!(app.scroll_offset, 0);
+    }
+
+    #[test]
+    fn return_to_picker_resets_counters() {
+        let mut app = chat_app_fixture();
+        app.return_to_picker();
+        assert_eq!(app.total_input_tokens, 0);
+        assert_eq!(app.total_output_tokens, 0);
+        assert_eq!(app.prompt_count, 0);
+        assert_eq!(app.context_used, 0);
+        assert!(app.undo_checkpoints.is_empty());
+    }
+
+    #[test]
+    fn return_to_picker_resets_picker_selection() {
+        let mut app = chat_app_fixture();
+        app.picker_selected = 5;
+        app.picker_scroll_offset = 100;
+        app.return_to_picker();
+        assert_eq!(app.picker_selected, 0);
+        assert_eq!(app.picker_scroll_offset, 0);
+    }
+
+    #[test]
+    fn return_to_picker_is_idempotent() {
+        let mut app = chat_app_fixture();
+        app.return_to_picker();
+        app.return_to_picker();
+        assert_eq!(app.screen, Screen::Picker);
+    }
 }
