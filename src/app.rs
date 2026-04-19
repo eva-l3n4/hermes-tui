@@ -2126,7 +2126,12 @@ impl App {
                 duration_seconds,
             } => {
                 if let Some(task) = self.subagents.get_mut(child_id) {
-                    task.status = if status == "success" {
+                    // Accept both "success" (per the _hermes/subagent_update
+                    // spec) and "completed" (older Hermes versions that
+                    // relayed the internal status string unmapped). Any
+                    // other value — "failed", "interrupted", or unknown —
+                    // is treated as a failure.
+                    task.status = if status == "success" || status == "completed" {
                         SubagentStatus::Done
                     } else {
                         SubagentStatus::Failed
