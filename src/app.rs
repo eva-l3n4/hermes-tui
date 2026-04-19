@@ -191,6 +191,62 @@ pub enum CopyScope {
     CodeBlock,
 }
 
+/// Base64-encode without pulling in a crate. RFC 4648 standard alphabet.
+fn base64_encode(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b = [
+            chunk[0],
+            if chunk.len() > 1 { chunk[1] } else { 0 },
+            if chunk.len() > 2 { chunk[2] } else { 0 },
+        ];
+        out.push(ALPHABET[(b[0] >> 2) as usize] as char);
+        out.push(ALPHABET[(((b[0] & 0b11) << 4) | (b[1] >> 4)) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(ALPHABET[(((b[1] & 0b1111) << 2) | (b[2] >> 6)) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(ALPHABET[(b[2] & 0b111111) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+/// Copy via OSC 52 escape sequence — works over SSH without a display server.
+/// Returns Some(message) on success, None if we couldn't write to the TTY at all.
+/// Inside tmux we wrap the sequence with DCS passthrough so tmux forwards it to
+/// the outer terminal.
+pub fn copy_via_osc52(text: &str) -> Option<String> {
+    use std::io::Write;
+
+    let encoded = base64_encode(text.as_bytes());
+    let in_tmux = std::env::var("TMUX").is_ok();
+    let payload = if in_tmux {
+        // tmux DCS passthrough: ESC P tmux; (escaped inner ESC) ... ESC \
+        format!("\x1bPtmux;\x1b\x1b]52;c;{encoded}\x07\x1b\\")
+    } else {
+        format!("\x1b]52;c;{encoded}\x07")
+    };
+
+    // Write to /dev/tty directly — ratatui owns stdout.
+    let mut tty = std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/tty")
+        .ok()?;
+    tty.write_all(payload.as_bytes()).ok()?;
+    tty.flush().ok()?;
+    Some(format!(
+        "copied {} chars via OSC 52 (check your local clipboard)",
+        text.chars().count()
+    ))
+}
+
 /// Extract the content of the last fenced code block (without fences).
 /// Returns None if no code blocks are present.
 pub fn extract_last_code_block(text: &str) -> Option<String> {
@@ -1454,6 +1510,12 @@ impl App {
             CopyScope::CodeBlock => extract_last_code_block(&msg.content).unwrap_or(raw),
         };
 
+        // Try OSC 52 first — works over SSH, no display server needed, terminals
+        // like Terminus/kitty/wezterm/alacritty/foot/iTerm2/ghostty all support it.
+        // Fall back to arboard for desktop terminals that strip OSC 52.
+        if let Some(result) = copy_via_osc52(&text) {
+            return result;
+        }
         match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text.clone())) {
             Ok(()) => format!("copied {} chars to clipboard", text.chars().count()),
             Err(e) => format!("copy failed: {e}"),
@@ -2401,5 +2463,19 @@ mod copy_tests {
     fn preserves_multiline_content() {
         let text = "```\nline 1\nline 2\nline 3\n```";
         assert_eq!(extract_last_code_block(text), Some("line 1\nline 2\nline 3".to_string()));
+    }
+
+    #[test]
+    fn base64_known_values() {
+        use super::base64_encode;
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+        // Unicode through UTF-8 bytes
+        assert_eq!(base64_encode("🌸".as_bytes()), "8J+MuA==");
     }
 }
