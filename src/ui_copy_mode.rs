@@ -54,6 +54,7 @@ pub fn draw_copy_mode(f: &mut Frame, app: &App, selected: usize, scope: &CopySco
                 Role::System => "·",
                 Role::Tool => "▸",
                 Role::Thought => "◌",
+                Role::Subagent => "⎇",
             };
             let preview: String = m
                 .content

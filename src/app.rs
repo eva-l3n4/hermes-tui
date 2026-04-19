@@ -23,6 +23,7 @@ pub enum Role {
     System,
     Tool,
     Thought,
+    Subagent,
 }
 
 /// A single message in the conversation view.
@@ -31,6 +32,48 @@ pub struct ChatMessage {
     pub role: Role,
     pub content: String,
     pub tokens: Option<Usage>,
+}
+
+/// Live state of a delegated subagent task.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // fields consumed by the zoom view (Task 6)
+pub struct SubagentTask {
+    pub child_session_id: String,
+    pub goal: String,
+    pub task_index: usize,
+    pub task_count: usize,
+    pub status: SubagentStatus,
+    pub last_tool: Option<String>,
+    pub last_preview: Option<String>,
+    pub last_thinking: Option<String>,
+    pub duration_seconds: Option<f64>,
+    pub summary: Option<String>,
+    pub started_at: std::time::Instant,
+    /// Full event history for the future zoom view (Task 6).
+    pub events: Vec<SubagentTranscriptEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubagentStatus {
+    Running,
+    Done,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // fields consumed by the zoom view (Task 6)
+pub struct SubagentTranscriptEvent {
+    pub kind: SubagentTranscriptKind,
+    pub at: std::time::Instant,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // variants + fields consumed by the zoom view (Task 6)
+pub enum SubagentTranscriptKind {
+    Start { goal: String },
+    Thinking { text: String },
+    Tool { name: String, preview: Option<String> },
+    Complete { status: String, summary: Option<String>, duration_seconds: Option<f64> },
 }
 
 /// What the assistant is currently doing (gates input acceptance).
@@ -357,6 +400,9 @@ pub struct App {
     pub active_tools: Vec<(String, String)>, // (id, name)
     pub tool_msg_map: HashMap<String, usize>, // tool_call_id → message index
 
+    // Subagent tasks (keyed by child_session_id)
+    pub subagents: HashMap<String, SubagentTask>,
+
     // Input history
     pub input_history: Vec<String>,
     pub history_index: Option<usize>,
@@ -428,6 +474,7 @@ impl App {
             event_tx: None,
             active_tools: Vec::new(),
             tool_msg_map: HashMap::new(),
+            subagents: HashMap::new(),
             input_history: Vec::new(),
             history_index: None,
             saved_input: String::new(),
@@ -1698,6 +1745,7 @@ impl App {
                         Role::System => "## System",
                         Role::Thought => "## Thought",
                         Role::Tool => "## Tool",
+                        Role::Subagent => "## Subagent",
                     };
                     content.push_str(label);
                     content.push_str("\n\n");
@@ -1911,6 +1959,105 @@ impl App {
 
             if status == "completed" || status == "error" {
                 self.tool_msg_map.remove(id);
+            }
+        }
+    }
+
+    pub fn handle_subagent_update(&mut self, update: &crate::event::SubagentUpdate) {
+        use crate::event::SubagentEventKind;
+
+        let child_id = &update.child_session_id;
+
+        match &update.kind {
+            SubagentEventKind::Start { goal } => {
+                // Insert tracking state
+                let task = SubagentTask {
+                    child_session_id: child_id.clone(),
+                    goal: goal.clone(),
+                    task_index: update.task_index,
+                    task_count: update.task_count,
+                    status: SubagentStatus::Running,
+                    last_tool: None,
+                    last_preview: None,
+                    last_thinking: None,
+                    duration_seconds: None,
+                    summary: None,
+                    started_at: std::time::Instant::now(),
+                    events: Vec::new(),
+                };
+                self.subagents.insert(child_id.clone(), task);
+
+                // Append a transcript message keyed on the child session id
+                let msg_idx = self.messages.len();
+                self.messages.push(ChatMessage {
+                    role: Role::Subagent,
+                    content: child_id.clone(),
+                    tokens: None,
+                });
+                // Seed line cache entry (will be overwritten on each render)
+                self.line_cache.resize(msg_idx + 1, Vec::new());
+                self.scroll_offset = 0;
+            }
+            SubagentEventKind::Thinking { text } => {
+                if let Some(task) = self.subagents.get_mut(child_id) {
+                    task.last_thinking = Some(text.clone());
+                    task.events.push(SubagentTranscriptEvent {
+                        kind: SubagentTranscriptKind::Thinking { text: text.clone() },
+                        at: std::time::Instant::now(),
+                    });
+                    self.invalidate_subagent_line_cache(child_id);
+                }
+            }
+            SubagentEventKind::Tool { name, preview } => {
+                if let Some(task) = self.subagents.get_mut(child_id) {
+                    task.last_tool = Some(name.clone());
+                    task.last_preview = preview.clone();
+                    task.events.push(SubagentTranscriptEvent {
+                        kind: SubagentTranscriptKind::Tool {
+                            name: name.clone(),
+                            preview: preview.clone(),
+                        },
+                        at: std::time::Instant::now(),
+                    });
+                    self.invalidate_subagent_line_cache(child_id);
+                }
+            }
+            SubagentEventKind::Complete {
+                status,
+                summary,
+                duration_seconds,
+            } => {
+                if let Some(task) = self.subagents.get_mut(child_id) {
+                    task.status = if status == "success" {
+                        SubagentStatus::Done
+                    } else {
+                        SubagentStatus::Failed
+                    };
+                    task.summary = summary.clone();
+                    task.duration_seconds = *duration_seconds;
+                    task.events.push(SubagentTranscriptEvent {
+                        kind: SubagentTranscriptKind::Complete {
+                            status: status.clone(),
+                            summary: summary.clone(),
+                            duration_seconds: *duration_seconds,
+                        },
+                        at: std::time::Instant::now(),
+                    });
+                    self.invalidate_subagent_line_cache(child_id);
+                }
+            }
+        }
+    }
+
+    /// Invalidate the line-cache entry for the Subagent message whose content
+    /// matches the given child_session_id.
+    fn invalidate_subagent_line_cache(&mut self, child_id: &str) {
+        for (i, msg) in self.messages.iter().enumerate() {
+            if msg.role == Role::Subagent && msg.content == child_id {
+                if i < self.line_cache.len() {
+                    self.line_cache[i] = Vec::new();
+                }
+                break;
             }
         }
     }

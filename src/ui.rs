@@ -423,7 +423,7 @@ fn draw_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     while app.line_cache.len() < app.messages.len() {
         let idx = app.line_cache.len();
         let mut lines: Vec<Line> = Vec::new();
-        render_message(&mut lines, &app.messages[idx], inner_width, app.verbose, app.show_thinking, narrow);
+        render_message(&mut lines, &app.messages[idx], inner_width, app.verbose, app.show_thinking, narrow, app);
         lines.push(Line::from(""));
         lines = pre_wrap_lines(lines, inner_width);
         app.line_cache.push(lines);
@@ -710,7 +710,14 @@ fn render_message(
     _verbose: bool,
     show_thinking: bool,
     narrow: bool,
+    app: &App,
 ) {
+    // Subagent messages render with live status from app.subagents
+    if msg.role == Role::Subagent {
+        render_subagent_line(lines, msg, width, narrow, app);
+        return;
+    }
+
     // Tool messages render with box-drawing frame
     if msg.role == Role::Tool {
         let (icon, color) = if msg.content.starts_with('✓') {
@@ -827,6 +834,7 @@ fn render_message(
         Role::System => ("● ", palette::ACCENT_SYSTEM),
         Role::Tool => unreachable!(),
         Role::Thought => ("○ ", palette::ACCENT_THOUGHT),
+        Role::Subagent => unreachable!(),
     };
 
     match msg.role {
@@ -926,6 +934,162 @@ fn render_message(
             }
         }
     }
+}
+
+/// Render a single-line subagent task status with live state.
+///
+/// Format:
+///   Running: `⎇ [n/N] ● goal…                         → tool_name "preview…"`
+///   Done:    `⎇ [n/N] ● goal…                                             ✓ 12.3s`
+///   Failed:  `⎇ [n/N] ● goal…                                             ✗ 12.3s`
+fn render_subagent_line(
+    lines: &mut Vec<Line>,
+    msg: &ChatMessage,
+    width: usize,
+    narrow: bool,
+    app: &App,
+) {
+    use crate::app::SubagentStatus;
+
+    let child_id = &msg.content;
+    let Some(task) = app.subagents.get(child_id) else {
+        lines.push(Line::from(Span::styled(
+            format!("  {} (unknown subagent)", '\u{2387}'),
+            Style::default().fg(Color::DarkGray),
+        )));
+        return;
+    };
+
+    let ind = indent(narrow);
+
+    // ── Prefix: ⎇ icon ──
+    let icon_char = '\u{2387}'; // ⎇
+    let mut spans: Vec<Span> = vec![Span::styled(
+        format!("{}{} ", ind, icon_char),
+        Style::default().fg(palette::ACCENT_ASSISTANT),
+    )];
+
+    // ── Batch index [n/N] only when task_count > 1 ──
+    if task.task_count > 1 {
+        spans.push(Span::styled(
+            format!("[{}/{}] ", task.task_index + 1, task.task_count),
+            Style::default().fg(palette::DIM),
+        ));
+    }
+
+    // ── Status dot ──
+    let (dot, dot_color) = match task.status {
+        SubagentStatus::Running => ("●", Color::Yellow),
+        SubagentStatus::Done => ("●", palette::SUCCESS),
+        SubagentStatus::Failed => ("●", palette::ERROR),
+    };
+    spans.push(Span::styled(format!("{} ", dot), Style::default().fg(dot_color)));
+
+    // ── Goal text (truncated to ~55 chars) ──
+    let goal_display: String = if task.goal.chars().count() > 55 {
+        let end = task
+            .goal
+            .char_indices()
+            .nth(55)
+            .map(|(i, _)| i)
+            .unwrap_or(task.goal.len());
+        format!("{}…", &task.goal[..end])
+    } else {
+        task.goal.clone()
+    };
+    spans.push(Span::styled(
+        goal_display.clone(),
+        Style::default().fg(palette::ACCENT_USER),
+    ));
+
+    // ── Right-aligned tail: activity indicator ──
+    let tail_text = match &task.status {
+        SubagentStatus::Running => {
+            if let Some(ref tool_name) = task.last_tool {
+                // → tool_name "preview…"
+                let preview = task
+                    .last_preview
+                    .as_ref()
+                    .map(|p| {
+                        let truncated: String = if p.chars().count() > 30 {
+                            let end = p
+                                .char_indices()
+                                .nth(30)
+                                .map(|(i, _)| i)
+                                .unwrap_or(p.len());
+                            format!("{}…", &p[..end])
+                        } else {
+                            p.clone()
+                        };
+                        format!(" \"{}\"", truncated)
+                    })
+                    .unwrap_or_default();
+                Some((
+                    vec![
+                        Span::styled(
+                            format!("→ {}", tool_name),
+                            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                        ),
+                        Span::styled(preview, Style::default().fg(Color::DarkGray)),
+                    ],
+                    true,
+                ))
+            } else {
+                None
+            }
+        }
+        SubagentStatus::Done => {
+            let dur = task.duration_seconds.map(format_elapsed).unwrap_or_default();
+            if dur.is_empty() {
+                Some((
+                    vec![Span::styled("✓", Style::default().fg(palette::SUCCESS))],
+                    false,
+                ))
+            } else {
+                Some((
+                    vec![Span::styled(
+                        format!("✓ {}", dur),
+                        Style::default().fg(palette::SUCCESS),
+                    )],
+                    false,
+                ))
+            }
+        }
+        SubagentStatus::Failed => {
+            let dur = task.duration_seconds.map(format_elapsed).unwrap_or_default();
+            if dur.is_empty() {
+                Some((
+                    vec![Span::styled("✗", Style::default().fg(palette::ERROR))],
+                    false,
+                ))
+            } else {
+                Some((
+                    vec![Span::styled(
+                        format!("✗ {}", dur),
+                        Style::default().fg(palette::ERROR),
+                    )],
+                    false,
+                ))
+            }
+        }
+    };
+
+    if let Some((tail_spans, _is_tool_activity)) = tail_text {
+        // Calculate left-side width for right-alignment padding
+        let left_str: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        let left_width = UnicodeWidthStr::width(left_str.as_str());
+
+        let tail_str: String = tail_spans.iter().map(|s| s.content.as_ref()).collect();
+        let tail_width = UnicodeWidthStr::width(tail_str.as_str());
+
+        let pad = width.saturating_sub(left_width + tail_width);
+        spans.push(Span::raw(" ".repeat(pad)));
+        spans.extend(tail_spans);
+    } else {
+        // No tail, just left-aligned goal
+    }
+
+    lines.push(Line::from(spans));
 }
 
 // ─── Markdown → ratatui Lines ────────────────────────────────────────────
