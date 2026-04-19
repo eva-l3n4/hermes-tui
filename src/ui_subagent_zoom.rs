@@ -1,4 +1,4 @@
-use crate::app::{App, SubagentStatus, SubagentTranscriptKind};
+use crate::app::{App, Role, SubagentStatus, SubagentTranscriptKind};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -9,6 +9,13 @@ use ratatui::{
 
 pub fn draw_zoom(frame: &mut Frame, area: Rect, app: &App, child_session_id: &str) {
     let task = app.subagents.get(child_session_id);
+
+    // Count total subagents for cycling hint
+    let subagent_count = app
+        .messages
+        .iter()
+        .filter(|m| matches!(m.role, Role::Subagent))
+        .count();
 
     // Layout: header bar (3 rows) + body + footer hint (1 row)
     let chunks = Layout::default()
@@ -24,7 +31,7 @@ pub fn draw_zoom(frame: &mut Frame, area: Rect, app: &App, child_session_id: &st
     let header_text = match task {
         Some(t) => render_header_line(t),
         None => vec![Line::from(Span::styled(
-            "  \u{2190} subagent (unknown)",
+            "  ← subagent (unknown)",
             Style::default().fg(Color::DarkGray),
         ))],
     };
@@ -39,21 +46,27 @@ pub fn draw_zoom(frame: &mut Frame, area: Rect, app: &App, child_session_id: &st
     let body_lines: Vec<Line> = match task {
         Some(t) => render_body_lines(t, chunks[1].width),
         None => vec![Line::from(
-            "  (no events recorded yet \u{2014} waiting for subagent to report)",
+            "  (no events recorded yet — waiting for subagent to report)",
         )],
     };
     let body = Paragraph::new(body_lines).scroll((app.subagent_zoom_scroll, 0));
     frame.render_widget(body, chunks[1]);
 
     // --- Footer ---
-    let footer = Paragraph::new(Line::from(vec![
-        Span::styled("  \u{2191}", Style::default().fg(Color::Yellow)),
+    let mut footer_spans = vec![
+        Span::styled("  ↑", Style::default().fg(Color::Yellow)),
         Span::styled(" back to parent   ", Style::default().fg(Color::DarkGray)),
-        Span::styled("\u{2193}/PageDown", Style::default().fg(Color::Yellow)),
+        Span::styled("↓/PageDown", Style::default().fg(Color::Yellow)),
         Span::styled(" scroll   ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Esc", Style::default().fg(Color::Yellow)),
-        Span::styled(" exit zoom", Style::default().fg(Color::DarkGray)),
-    ]));
+    ];
+    // Add cycling hint if there are multiple subagents
+    if subagent_count > 1 {
+        footer_spans.push(Span::styled("Ctrl+Z", Style::default().fg(Color::Yellow)));
+        footer_spans.push(Span::styled(" next   ", Style::default().fg(Color::DarkGray)));
+    }
+    footer_spans.push(Span::styled("Esc", Style::default().fg(Color::Yellow)));
+    footer_spans.push(Span::styled(" exit zoom", Style::default().fg(Color::DarkGray)));
+    let footer = Paragraph::new(Line::from(footer_spans));
     frame.render_widget(footer, chunks[2]);
 }
 

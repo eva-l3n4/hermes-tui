@@ -1597,6 +1597,32 @@ impl App {
     async fn handle_zoom_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc => self.screen = Screen::Chat,
+            // Ctrl+Z: cycle to the next subagent in transcript order
+            KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let current_sid = match &self.screen {
+                    Screen::SubagentZoom { child_session_id } => child_session_id.clone(),
+                    _ => return Ok(()),
+                };
+                // Collect all subagent session IDs from the transcript in order
+                let subagent_sids: Vec<String> = self
+                    .messages
+                    .iter()
+                    .filter_map(|m| {
+                        if matches!(m.role, Role::Subagent) {
+                            Some(m.content.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if let Some(pos) = subagent_sids.iter().position(|s| s == &current_sid) {
+                    let next = &subagent_sids[(pos + 1) % subagent_sids.len()];
+                    self.screen = Screen::SubagentZoom {
+                        child_session_id: next.clone(),
+                    };
+                    self.subagent_zoom_scroll = 0;
+                }
+            }
             KeyCode::Up => {
                 if self.subagent_zoom_scroll == 0 {
                     self.screen = Screen::Chat;
