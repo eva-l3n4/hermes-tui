@@ -619,6 +619,22 @@ impl App {
                 self.quit = true;
             }
 
+            // Ctrl+B: back to session picker (only when input is empty)
+            (KeyModifiers::CONTROL, KeyCode::Char('b')) if self.input.is_empty() => {
+                self.return_to_picker();
+                // Refresh session list in background so new sessions
+                // created elsewhere appear on return.
+                if let Some(tx) = &self.event_tx {
+                    let tx = tx.clone();
+                    let acp = acp.clone();
+                    tokio::spawn(async move {
+                        if let Ok(sessions) = acp.list_sessions().await {
+                            let _ = tx.send(crate::event::AppEvent::SessionsLoaded(sessions));
+                        }
+                    });
+                }
+            }
+
             // Ctrl+P: command palette
             (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
                 let entries = Self::build_palette_entries();
