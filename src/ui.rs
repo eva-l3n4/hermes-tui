@@ -926,6 +926,87 @@ fn render_message(
 
 // ─── Markdown → ratatui Lines ────────────────────────────────────────────
 
+/// True iff `line` looks like a GFM table separator row: `| --- | :--: |` etc.
+/// Requires at least one dash per cell and all cells match `[- :]+` with a dash.
+fn is_table_separator(line: &str) -> bool {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
+        return false;
+    }
+    let cells: Vec<&str> = trimmed.trim_matches('|').split('|').collect();
+    if cells.is_empty() {
+        return false;
+    }
+    cells.iter().all(|cell| {
+        let c = cell.trim();
+        !c.is_empty()
+            && c.chars().all(|ch| matches!(ch, '-' | ':' | ' '))
+            && c.contains('-')
+    })
+}
+
+/// True iff `line` contains box-drawing chars indicating pre-rendered output.
+/// We never try to markdown-table such lines.
+fn has_box_drawing(line: &str) -> bool {
+    line.chars().any(|c| {
+        matches!(
+            c,
+            '│' | '║'
+                | '┃'
+                | '─'
+                | '━'
+                | '┼'
+                | '╫'
+                | '╪'
+                | '╬'
+                | '├'
+                | '┤'
+                | '┬'
+                | '┴'
+                | '┌'
+                | '┐'
+                | '└'
+                | '┘'
+                | '╭'
+                | '╮'
+                | '╯'
+                | '╰'
+        )
+    })
+}
+
+/// Render accumulated table rows. If `has_separator` is false, the buffered
+/// rows weren't a real GFM table — emit them as plain inline-parsed lines so
+/// the user still sees their original text.
+fn flush_table_buffer<'a>(
+    rows: &mut Vec<Vec<String>>,
+    has_separator: &mut bool,
+    lines: &mut Vec<Line<'a>>,
+    narrow: bool,
+) {
+    if rows.is_empty() {
+        *has_separator = false;
+        return;
+    }
+
+    if !*has_separator {
+        // Not a real table — render each buffered row as a plain line.
+        let ind = indent(narrow);
+        for row in rows.iter() {
+            let joined = format!("| {} |", row.join(" | "));
+            let mut spans = vec![Span::raw(ind.to_string())];
+            spans.extend(parse_inline_spans(&joined));
+            lines.push(Line::from(spans));
+        }
+        rows.clear();
+        *has_separator = false;
+        return;
+    }
+
+    flush_table(rows, lines, narrow);
+    *has_separator = false;
+}
+
 /// Render accumulated table rows as aligned columns, then clear the buffer.
 fn flush_table<'a>(rows: &mut Vec<Vec<String>>, lines: &mut Vec<Line<'a>>, narrow: bool) {
     if rows.is_empty() {
@@ -988,6 +1069,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize, narro
     let mut in_code_block = false;
     let mut code_lang = String::new();
     let mut table_rows: Vec<Vec<String>> = Vec::new();
+    let mut table_has_separator = false;
 
     for raw_line in text.lines() {
         // Fenced code blocks
@@ -1097,7 +1179,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize, narro
 
         // Blockquotes
         if let Some(quote) = trimmed.strip_prefix("> ") {
-            flush_table(&mut table_rows, lines, narrow);
+            flush_table_buffer(&mut table_rows, &mut table_has_separator, lines, narrow);
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("{}▎ ", indent(narrow)),
@@ -1113,26 +1195,35 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize, narro
             continue;
         }
 
-        // Pipe-delimited tables: accumulate rows, render on flush
-        if trimmed.starts_with('|') && trimmed.ends_with('|') {
-            // Skip separator rows (| --- | --- |) but keep for detection
-            let is_separator = trimmed
+        // Pipe-delimited tables: require a GFM separator row on line 2 before
+        // committing to table rendering. Lines containing box-drawing chars
+        // (pre-rendered ASCII tables from the server) are never treated as
+        // pipe-tables — they drop through to plain paragraph rendering.
+        if trimmed.starts_with('|') && trimmed.ends_with('|') && !has_box_drawing(trimmed) {
+            if is_table_separator(trimmed) {
+                if table_rows.len() == 1 {
+                    // Valid GFM separator following a header row.
+                    table_has_separator = true;
+                    continue;
+                }
+                // Stray separator outside table context — render as paragraph.
+                flush_table_buffer(&mut table_rows, &mut table_has_separator, lines, narrow);
+                let mut spans = vec![Span::raw(indent(narrow).to_string())];
+                spans.extend(parse_inline_spans(raw_line.trim_start()));
+                lines.push(Line::from(spans));
+                continue;
+            }
+            let cells: Vec<String> = trimmed
                 .trim_matches('|')
                 .split('|')
-                .all(|cell| cell.trim().chars().all(|c| c == '-' || c == ':' || c == ' '));
-            if !is_separator {
-                let cells: Vec<String> = trimmed
-                    .trim_matches('|')
-                    .split('|')
-                    .map(|c| c.trim().to_string())
-                    .collect();
-                table_rows.push(cells);
-            }
+                .map(|c| c.trim().to_string())
+                .collect();
+            table_rows.push(cells);
             continue;
         }
 
-        // If we were accumulating table rows but this line isn't a table line, flush
-        flush_table(&mut table_rows, lines, narrow);
+        // If we were accumulating table rows but this line isn't a table line, flush.
+        flush_table_buffer(&mut table_rows, &mut table_has_separator, lines, narrow);
 
         // Regular paragraph
         if trimmed.is_empty() {
@@ -1153,7 +1244,7 @@ fn render_markdown_lines(lines: &mut Vec<Line>, text: &str, _width: usize, narro
     }
 
     // Flush any remaining table rows
-    flush_table(&mut table_rows, lines, narrow);
+    flush_table_buffer(&mut table_rows, &mut table_has_separator, lines, narrow);
 }
 
 /// Parse inline markdown: **bold**, *italic*, `code`
@@ -1602,4 +1693,76 @@ fn draw_disconnected(frame: &mut Frame, error: &str) {
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
+}
+
+#[cfg(test)]
+mod md_tests {
+    use super::{has_box_drawing, is_table_separator, render_markdown_lines};
+
+    #[test]
+    fn separator_recognition() {
+        assert!(is_table_separator("| --- | --- |"));
+        assert!(is_table_separator("|:---|:---:|---:|"));
+        assert!(!is_table_separator("| text | text |"));
+        assert!(!is_table_separator("| --- text | --- |"));
+    }
+
+    #[test]
+    fn box_drawing_detection() {
+        assert!(has_box_drawing("Task │ Before ║"));
+        assert!(has_box_drawing("─────┼─────"));
+        assert!(!has_box_drawing("| header | second |"));
+        assert!(!has_box_drawing("plain text"));
+    }
+
+    #[test]
+    fn real_gfm_table_renders_as_table() {
+        let mut lines = Vec::new();
+        let text = "| a | b |\n| --- | --- |\n| 1 | 2 |";
+        render_markdown_lines(&mut lines, text, 80, false);
+        // Header + separator underline + data row = 3 lines minimum
+        assert!(lines.len() >= 3, "expected real table to render; got {:?}", lines.iter().map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn pre_rendered_box_table_does_not_cascade() {
+        let mut lines = Vec::new();
+        let text = "Task                    │ Before                         ║\n\
+                    │    │ After                                 │ Rationale      ║\n\
+                    │                              ────────────────────────┼──────║\n\
+                    │    **Primary**             │ azure/claude-opus-4-7          ║";
+        render_markdown_lines(&mut lines, text, 80, false);
+        // Check that none of the rendered lines contain the ─┼─ cascade we were
+        // producing before. Collect all content.
+        let combined: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref().to_string()))
+            .collect();
+        // Original box-drawing chars should pass through untouched; we should
+        // NOT be generating new `─┼─` separator rows of our own.
+        // A generated separator would be many `─` then `┼` then many `─`
+        // without box chars around — the input already has `┼` though, so
+        // a looser check: the output should have at most as many `┼` as input.
+        let input_cross = text.chars().filter(|&c| c == '┼').count();
+        let output_cross = combined.chars().filter(|&c| c == '┼').count();
+        assert!(output_cross <= input_cross,
+            "generated new ┼ separators: input had {}, output has {}", input_cross, output_cross);
+    }
+
+    #[test]
+    fn underscore_emphasis() {
+        use super::parse_inline_spans;
+        // _italic_ emphasized
+        let spans = parse_inline_spans("plain _italic_ text");
+        let italic_span = spans.iter().find(|s| s.content == "italic");
+        assert!(italic_span.is_some(), "spans: {:?}", spans);
+
+        // snake_case stays plain
+        let spans = parse_inline_spans("var_name is here");
+        let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(joined, "var_name is here");
+        // No italic styling applied
+        assert!(!spans.iter().any(|s| s.style.add_modifier.contains(ratatui::style::Modifier::ITALIC)),
+            "intraword underscore should not italicize: {:?}", spans);
+    }
 }
