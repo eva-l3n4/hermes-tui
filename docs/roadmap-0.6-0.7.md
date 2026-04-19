@@ -66,6 +66,24 @@ Shipped 2026-04-19.
 
 ---
 
+## v0.8.3 — Scroll fidelity ✓
+
+Shipped 2026-04-19.
+
+- ✓ **Picker opens at top**, not bottom — fixed inverted scroll math
+  that had the oldest session pinned to the viewport bottom with
+  `+ New Session` off-screen above.
+- ✓ **Picker keyboard scroll-follow** — `j`/`k`/Up/Down past the
+  viewport edge now scrolls the list so the selected card stays
+  visible. `CARD_HEIGHT` extracted as a shared constant.
+- ✓ **Palette scroll-follow** — `Ctrl+P` list uses `render_stateful_widget`
+  with `ListState`, auto-scrolls to keep the selected entry on-screen.
+- ✓ **File popup scroll-follow** — `@` autocomplete drops the
+  hardcoded `take(8)` cap, renders via `ListState`, scrolls past
+  the visible window.
+
+---
+
 ## v0.9.0+ — Aspirational
 
 19. **Session deletion from picker**
