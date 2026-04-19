@@ -2,7 +2,22 @@
 name = "kaishi"
 version = "0.8.4"
 edition = "2021"
-description = "懐紙 Kaishi — Terminal UI for Hermes Agent"
+authors = ["EvaL3n4"]
+description = "懐紙 Kaishi — Terminal UI for Hermes Agent, speaking ACP over stdio"
+license = "MIT"
+repository = "https://github.com/eva-l3n4/kaishi"
+homepage = "https://github.com/eva-l3n4/kaishi"
+documentation = "https://github.com/eva-l3n4/kaishi#readme"
+readme = "README.md"
+keywords = ["tui", "ratatui", "agent", "acp", "hermes"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [
+    "docs/",
+    "site/",
+    "netlify.toml",
+    ".superpowers/",
+    "target/",
+]
 
 [[bin]]
 name = "kaishi"
