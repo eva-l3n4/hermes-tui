@@ -176,6 +176,49 @@ pub enum ModalState {
         entries: Vec<String>,
         loading: bool,
     },
+    CopyMode {
+        selected: usize,
+        scope: CopyScope,
+    },
+}
+
+/// Scope of what to copy in CopyMode.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CopyScope {
+    /// Copy the entire raw message content.
+    Message,
+    /// Copy only the last fenced code block in the message.
+    CodeBlock,
+}
+
+/// Extract the content of the last fenced code block (without fences).
+/// Returns None if no code blocks are present.
+pub fn extract_last_code_block(text: &str) -> Option<String> {
+    let mut in_block = false;
+    let mut last_block: Option<String> = None;
+    let mut current = String::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            if in_block {
+                last_block = Some(std::mem::take(&mut current));
+                in_block = false;
+            } else {
+                in_block = true;
+                current.clear();
+            }
+        } else if in_block {
+            if !current.is_empty() {
+                current.push('\n');
+            }
+            current.push_str(line);
+        }
+    }
+    // Unclosed block — still return what we captured.
+    if in_block && !current.is_empty() {
+        last_block = Some(current);
+    }
+    last_block
 }
 
 /// Fuzzy subsequence match (case-insensitive).
@@ -369,6 +412,7 @@ impl App {
         vec![
             PaletteEntry { label: "New session".into(), keybind: None, action: PaletteAction::SlashCommand("/new".into()) },
             PaletteEntry { label: "Switch session".into(), keybind: Some("Ctrl+B".into()), action: PaletteAction::SlashCommand("/sessions".into()) },
+            PaletteEntry { label: "Copy message or code block".into(), keybind: Some("Ctrl+Y".into()), action: PaletteAction::Keybind("copy_mode".into()) },
             PaletteEntry { label: "Compact context".into(), keybind: None, action: PaletteAction::SlashCommand("/compact".into()) },
             PaletteEntry { label: "Save session".into(), keybind: None, action: PaletteAction::SlashCommand("/save".into()) },
             PaletteEntry { label: "Toggle YOLO mode".into(), keybind: Some("Shift+Tab".into()), action: PaletteAction::Keybind("toggle_yolo".into()) },
@@ -459,6 +503,7 @@ impl App {
             ModalState::EffortSlider { .. } => return self.handle_effort_key(key).await,
             ModalState::ReverseSearch { .. } => return self.handle_reverse_search_key(key).await,
             ModalState::FileAutocomplete { .. } => return self.handle_file_autocomplete_key(key).await,
+            ModalState::CopyMode { .. } => return self.handle_copy_mode_key(key).await,
             ModalState::None => {}
         }
 
@@ -653,6 +698,11 @@ impl App {
                     selected: 0,
                     filtered: entries,
                 };
+            }
+
+            // Ctrl+Y: copy mode
+            (KeyModifiers::CONTROL, KeyCode::Char('y')) => {
+                self.open_copy_mode();
             }
 
             // Ctrl+R: reverse history search
@@ -1221,6 +1271,7 @@ impl App {
                     self.line_cache.clear();
                 }
                 "undo" => { self.undo_last_turn(); }
+                "copy_mode" => { self.open_copy_mode(); }
                 _ => {}
             },
             PaletteAction::SetEffort(level) => {
@@ -1335,6 +1386,80 @@ impl App {
         Ok(())
     }
 
+    async fn handle_copy_mode_key(&mut self, key: KeyEvent) -> Result<()> {
+        let (sel, sc) = match &self.modal {
+            ModalState::CopyMode { selected, scope } => (*selected, scope.clone()),
+            _ => return Ok(()),
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.modal = ModalState::None;
+            }
+            KeyCode::Up | KeyCode::Char('k') if sel > 0 => {
+                if let ModalState::CopyMode { selected, .. } = &mut self.modal {
+                    *selected = sel - 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') if sel + 1 < self.messages.len() => {
+                if let ModalState::CopyMode { selected, .. } = &mut self.modal {
+                    *selected = sel + 1;
+                }
+            }
+            KeyCode::Char('c') => {
+                let new_scope = match sc {
+                    CopyScope::Message => CopyScope::CodeBlock,
+                    CopyScope::CodeBlock => CopyScope::Message,
+                };
+                if let ModalState::CopyMode { scope, .. } = &mut self.modal {
+                    *scope = new_scope;
+                }
+            }
+            KeyCode::Enter => {
+                let result = self.perform_copy(sel, &sc);
+                self.modal = ModalState::None;
+                self.sys_msg(result);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn open_copy_mode(&mut self) {
+        if self.messages.is_empty() {
+            self.sys_msg("nothing to copy".to_string());
+            return;
+        }
+        // Select the most recent non-system message by default.
+        let selected = self
+            .messages
+            .iter()
+            .rposition(|m| !matches!(m.role, Role::System))
+            .unwrap_or(self.messages.len() - 1);
+        self.modal = ModalState::CopyMode {
+            selected,
+            scope: CopyScope::Message,
+        };
+    }
+
+    pub fn perform_copy(&self, idx: usize, scope: &CopyScope) -> String {
+        let Some(msg) = self.messages.get(idx) else {
+            return "nothing to copy".to_string();
+        };
+
+        // Strip null bytes proactively — belt and suspenders.
+        let raw: String = msg.content.chars().filter(|&c| c != '\0').collect();
+
+        let text = match scope {
+            CopyScope::Message => raw,
+            CopyScope::CodeBlock => extract_last_code_block(&msg.content).unwrap_or(raw),
+        };
+
+        match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text.clone())) {
+            Ok(()) => format!("copied {} chars to clipboard", text.chars().count()),
+            Err(e) => format!("copy failed: {e}"),
+        }
+    }
+
     // ---- Local slash commands ------------------------------------------------
 
     async fn handle_local_command(&mut self, text: &str, acp: &Arc<AcpClient>, cwd: &str) -> bool {
@@ -1422,6 +1547,7 @@ impl App {
                      \n\
                      Ctrl+P:   Command palette\n\
                      Ctrl+B:   Back to session picker\n\
+                     Ctrl+Y:   Copy mode (message or code block)\n\
                      Ctrl+R:   Reverse history search\n\
                      Esc Esc:  Undo last turn\n\
                      Scroll:   PgUp/PgDn, Ctrl+U, mouse wheel\n\
@@ -2241,5 +2367,39 @@ mod tests {
         app.picker_selected = 20;
         app.ensure_picker_visible(0);
         assert_eq!(app.picker_scroll_offset, 7);
+    }
+}
+
+#[cfg(test)]
+mod copy_tests {
+    use super::extract_last_code_block;
+
+    #[test]
+    fn single_code_block() {
+        let text = "intro\n```rust\nfn main() {}\n```\nouter";
+        assert_eq!(extract_last_code_block(text), Some("fn main() {}".to_string()));
+    }
+
+    #[test]
+    fn last_of_many_code_blocks() {
+        let text = "```\nfirst\n```\nand\n```py\nsecond\n```";
+        assert_eq!(extract_last_code_block(text), Some("second".to_string()));
+    }
+
+    #[test]
+    fn no_code_block() {
+        assert_eq!(extract_last_code_block("just prose"), None);
+    }
+
+    #[test]
+    fn unclosed_block_returns_partial() {
+        let text = "start\n```\npartial content";
+        assert_eq!(extract_last_code_block(text), Some("partial content".to_string()));
+    }
+
+    #[test]
+    fn preserves_multiline_content() {
+        let text = "```\nline 1\nline 2\nline 3\n```";
+        assert_eq!(extract_last_code_block(text), Some("line 1\nline 2\nline 3".to_string()));
     }
 }

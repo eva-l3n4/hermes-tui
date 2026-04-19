@@ -2,6 +2,7 @@ mod acp;
 mod app;
 mod event;
 mod ui;
+mod ui_copy_mode;
 mod ui_effort;
 mod ui_file_popup;
 mod ui_modal;

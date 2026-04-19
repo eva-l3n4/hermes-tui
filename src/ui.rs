@@ -9,6 +9,7 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{AgentStatus, App, ChatMessage, ModalState, Role, Screen};
+use crate::ui_copy_mode;
 use crate::ui_effort;
 use crate::ui_file_popup;
 use crate::ui_modal;
@@ -260,6 +261,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
         ModalState::FileAutocomplete { .. } => {
             ui_file_popup::draw_file_popup(frame, app);
+        }
+        ModalState::CopyMode { selected, scope } => {
+            ui_copy_mode::draw_copy_mode(frame, app, *selected, scope);
         }
         ModalState::None => {}
     }
