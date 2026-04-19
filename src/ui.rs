@@ -1423,7 +1423,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
     // Show placeholder when input is empty
     let display_text = if app.input.is_empty() && app.status == AgentStatus::Idle {
-        "Type a message…"
+        "Type a message…  ·  Ctrl+P palette  ·  Ctrl+B sessions"
     } else {
         &app.input
     };
