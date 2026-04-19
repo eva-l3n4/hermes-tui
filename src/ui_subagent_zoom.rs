@@ -82,11 +82,14 @@ pub fn draw_zoom(frame: &mut Frame, area: Rect, app: &mut App, child_session_id:
     );
 
     // ── Footer ──
+    // Key bindings actually in effect: ↑ scrolls back into history (and
+    // exits to parent once at the top), ↓ tails toward newest, PgUp/PgDn
+    // jump by 10, Ctrl+Z cycles siblings (only in batch mode), Esc exits.
     let mut footer_spans = vec![
-        Span::styled("  ↑", Style::default().fg(palette::ACCENT_SYSTEM)),
-        Span::styled(" parent   ", Style::default().fg(palette::DIM)),
-        Span::styled("↓ PgDn", Style::default().fg(palette::ACCENT_SYSTEM)),
+        Span::styled("  ↑↓", Style::default().fg(palette::ACCENT_SYSTEM)),
         Span::styled(" scroll   ", Style::default().fg(palette::DIM)),
+        Span::styled("PgUp/PgDn", Style::default().fg(palette::ACCENT_SYSTEM)),
+        Span::styled(" page   ", Style::default().fg(palette::DIM)),
     ];
     if subagent_count > 1 {
         footer_spans.push(Span::styled(
