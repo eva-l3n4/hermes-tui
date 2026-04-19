@@ -1636,25 +1636,28 @@ impl App {
                 // Scroll backward into history. If already at the top
                 // of history (max_scroll), bounce back to parent chat —
                 // preserves the existing "up from the top exits" gesture.
+                //
+                // NOTE: `max` can be stale-zero on the first frame after
+                // entering the zoom view (geometry hasn't been stashed
+                // yet). When that happens we'd instantly exit on Up. Guard
+                // by requiring content_rows > 0; once the first draw lands,
+                // real geometry kicks in.
                 let max = self
                     .subagent_zoom_content_rows
                     .saturating_sub(self.subagent_zoom_viewport_rows);
-                if self.subagent_zoom_scroll >= max {
+                if self.subagent_zoom_content_rows > 0 && self.subagent_zoom_scroll >= max {
                     self.screen = Screen::Chat;
                 } else {
-                    self.subagent_zoom_scroll =
-                        self.subagent_zoom_scroll.saturating_add(1).min(max);
+                    self.subagent_zoom_scroll = self.subagent_zoom_scroll.saturating_add(1);
                 }
             }
             KeyCode::Down => {
                 self.subagent_zoom_scroll = self.subagent_zoom_scroll.saturating_sub(1);
             }
             KeyCode::PageUp => {
-                let max = self
-                    .subagent_zoom_content_rows
-                    .saturating_sub(self.subagent_zoom_viewport_rows);
-                self.subagent_zoom_scroll =
-                    self.subagent_zoom_scroll.saturating_add(10).min(max);
+                // Same first-frame geometry caveat as wheel scroll — let
+                // `draw_zoom` clamp against real max_scroll next frame.
+                self.subagent_zoom_scroll = self.subagent_zoom_scroll.saturating_add(10);
             }
             KeyCode::PageDown => {
                 self.subagent_zoom_scroll = self.subagent_zoom_scroll.saturating_sub(10);
@@ -2254,14 +2257,17 @@ impl App {
                 // Same semantics as the chat view:
                 // delta > 0 = wheel up → scroll backward into history (increase offset).
                 // delta < 0 = wheel down → scroll toward newest (decrease offset).
-                let max = self
-                    .subagent_zoom_content_rows
-                    .saturating_sub(self.subagent_zoom_viewport_rows);
+                //
+                // NOTE: do NOT `.min(max_scroll)` here — on the first frame
+                // after entering the zoom view, `subagent_zoom_content_rows`
+                // and `_viewport_rows` are still 0 (stale from a previous
+                // screen or init), so `max_scroll` would be 0 and the wheel
+                // would appear stuck. `draw_zoom` clamps the final offset
+                // against real geometry on every frame, so overshooting here
+                // is harmless and the first wheel event now takes effect.
                 if delta > 0 {
-                    self.subagent_zoom_scroll = self
-                        .subagent_zoom_scroll
-                        .saturating_add(delta as u16)
-                        .min(max);
+                    self.subagent_zoom_scroll =
+                        self.subagent_zoom_scroll.saturating_add(delta as u16);
                 } else {
                     self.subagent_zoom_scroll =
                         self.subagent_zoom_scroll.saturating_sub((-delta) as u16);
