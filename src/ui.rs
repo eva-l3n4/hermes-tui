@@ -264,14 +264,24 @@ fn draw_chat(frame: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),            // Status bar
-            Constraint::Min(5),              // Messages
+            Constraint::Min(5),               // Messages
             Constraint::Length(input_height), // Input
+            Constraint::Length(1),            // Hint row
         ])
         .split(area);
 
     draw_status_bar(frame, app, chunks[0]);
     draw_messages(frame, app, chunks[1]);
     draw_input(frame, app, chunks[2]);
+    draw_hint_row(frame, chunks[3]);
+}
+
+fn draw_hint_row(frame: &mut Frame, area: Rect) {
+    let hint = Line::from(Span::styled(
+        " Ctrl+P palette · Ctrl+B sessions · Ctrl+D quit",
+        Style::default().fg(palette::DIM),
+    ));
+    frame.render_widget(Paragraph::new(hint), area);
 }
 
 fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -1423,7 +1433,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
     // Show placeholder when input is empty
     let display_text = if app.input.is_empty() && app.status == AgentStatus::Idle {
-        "Type a message…  ·  Ctrl+P palette  ·  Ctrl+B sessions"
+        "Type a message…"
     } else {
         &app.input
     };
