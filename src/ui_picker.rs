@@ -10,6 +10,10 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::event::SessionInfo;
 
+/// Each session card (and the "New Session" card) occupies this many
+/// rendered lines: [title/label, meta/empty, separator blank].
+pub const CARD_HEIGHT: u16 = 3;
+
 /// Draw the session picker screen as a scrollable card list.
 pub fn draw_picker(
     frame: &mut Frame,

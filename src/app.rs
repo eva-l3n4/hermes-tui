@@ -226,6 +226,9 @@ pub struct App {
     pub sessions: Vec<SessionInfo>,
     pub picker_selected: usize,
     pub picker_scroll_offset: u16,
+    /// Last-observed height of the picker list area, stashed by the
+    /// renderer so keyboard handlers can scroll-follow the cursor.
+    pub picker_viewport_rows: u16,
 
     // Active session
     pub session_id: Option<String>,
@@ -302,6 +305,7 @@ impl App {
             sessions,
             picker_selected: 0,
             picker_scroll_offset: 0,
+            picker_viewport_rows: 0,
             session_id: None,
             cwd: String::new(),
             messages: vec![ChatMessage {
@@ -501,11 +505,15 @@ impl App {
                 if self.picker_selected > 0 =>
             {
                 self.picker_selected -= 1;
+                let rows = self.picker_viewport_rows;
+                self.ensure_picker_visible(rows);
             }
             (_, KeyCode::Down) | (_, KeyCode::Char('j'))
                 if self.picker_selected + 1 < total =>
             {
                 self.picker_selected += 1;
+                let rows = self.picker_viewport_rows;
+                self.ensure_picker_visible(rows);
             }
 
             (_, KeyCode::Enter) => {
@@ -1911,6 +1919,29 @@ impl App {
         self.history_loaded = 0;
         self.loading_more_history = false;
     }
+
+    /// Adjust `picker_scroll_offset` so the currently selected card is
+    /// within the visible viewport. `visible_rows` is the terminal-row
+    /// height of the picker list area (not including header/footer).
+    pub fn ensure_picker_visible(&mut self, visible_rows: u16) {
+        use crate::ui_picker::CARD_HEIGHT;
+        if visible_rows == 0 {
+            return;
+        }
+        let top_row = (self.picker_selected as u16).saturating_mul(CARD_HEIGHT);
+        let bot_row = top_row.saturating_add(CARD_HEIGHT);
+
+        // Selected card is above viewport
+        if top_row < self.picker_scroll_offset {
+            self.picker_scroll_offset = top_row;
+            return;
+        }
+        // Selected card is below viewport
+        let viewport_bottom = self.picker_scroll_offset.saturating_add(visible_rows);
+        if bot_row > viewport_bottom {
+            self.picker_scroll_offset = bot_row.saturating_sub(visible_rows);
+        }
+    }
 }
 
 /// Produce a short, readable summary of tool input by tool name.
@@ -2154,5 +2185,59 @@ mod tests {
         app.return_to_picker();
         app.return_to_picker();
         assert_eq!(app.screen, Screen::Picker);
+    }
+
+    #[test]
+    fn picker_scroll_follows_cursor_down() {
+        let mut app = App::new(vec![]);
+        // Card 5 occupies rows 15..18 (CARD_HEIGHT = 3).
+        // Viewport 10 rows tall starting at offset 0 → card 5 is off-screen.
+        app.picker_selected = 5;
+        app.picker_scroll_offset = 0;
+        app.ensure_picker_visible(10);
+        // Offset should be nudged so row 18 fits: offset ≥ 18 - 10 = 8.
+        assert!(
+            app.picker_scroll_offset >= 8,
+            "offset={} should be ≥ 8",
+            app.picker_scroll_offset
+        );
+        // And not overshoot past the top of the card (row 15).
+        assert!(
+            app.picker_scroll_offset <= 15,
+            "offset={} should be ≤ 15",
+            app.picker_scroll_offset
+        );
+    }
+
+    #[test]
+    fn picker_scroll_follows_cursor_up() {
+        let mut app = App::new(vec![]);
+        app.picker_scroll_offset = 30;
+        app.picker_selected = 2; // top row 6 → above offset 30
+        app.ensure_picker_visible(10);
+        assert!(
+            app.picker_scroll_offset <= 6,
+            "offset={} should be ≤ 6",
+            app.picker_scroll_offset
+        );
+    }
+
+    #[test]
+    fn picker_scroll_no_change_when_already_visible() {
+        let mut app = App::new(vec![]);
+        app.picker_scroll_offset = 5;
+        app.picker_selected = 3; // rows 9..12, viewport 5..15 → in view
+        app.ensure_picker_visible(10);
+        assert_eq!(app.picker_scroll_offset, 5);
+    }
+
+    #[test]
+    fn picker_scroll_ignores_zero_viewport() {
+        // Before any frame is drawn, viewport_rows is 0. Should no-op.
+        let mut app = App::new(vec![]);
+        app.picker_scroll_offset = 7;
+        app.picker_selected = 20;
+        app.ensure_picker_visible(0);
+        assert_eq!(app.picker_scroll_offset, 7);
     }
 }

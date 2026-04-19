@@ -222,6 +222,18 @@ fn indent(narrow: bool) -> &'static str {
 pub fn draw(frame: &mut Frame, app: &mut App) {
     match &app.screen.clone() {
         Screen::Picker => {
+            // Mirror the picker's Layout so we know the list area height —
+            // keyboard handlers use it to scroll-follow the selected card.
+            let area = frame.area();
+            let picker_chunks = ratatui::layout::Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints([
+                    ratatui::layout::Constraint::Length(3),
+                    ratatui::layout::Constraint::Min(3),
+                    ratatui::layout::Constraint::Length(2),
+                ])
+                .split(area);
+            app.picker_viewport_rows = picker_chunks[1].height;
             ui_picker::draw_picker(frame, &app.sessions, app.picker_selected, app.picker_scroll_offset);
         }
         Screen::Chat => {
