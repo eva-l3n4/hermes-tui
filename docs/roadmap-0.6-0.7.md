@@ -56,6 +56,16 @@ Build stats: 5,331 LOC across 11 source files, 4.0MB release binary.
 
 ---
 
+## v0.8.2 — Navigation ✓
+
+Shipped 2026-04-19.
+
+- ✓ **Return to session picker (Ctrl+B)** — one-way state reset,
+  background session list refresh, `/sessions` command (`/switch`
+  alias), "Switch session" palette entry.
+
+---
+
 ## v0.9.0+ — Aspirational
 
 19. **Session deletion from picker**
